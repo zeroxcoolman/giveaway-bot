@@ -31,7 +31,6 @@ class Giveaway:
         self.channel = channel
         self.winners = set()
         self.guessed_users = {}
-        self.last_guess_time = {}
         self.end_time = asyncio.get_event_loop().time() + (duration * 60 if duration > 0 else float('inf'))
         self.task = None
 
@@ -39,13 +38,7 @@ class Giveaway:
         # Prevent hoster from winning
         if user.id == self.hoster.id:
             return None
-        
-        # Check cooldown
-        current_time = asyncio.get_event_loop().time()
-        if user.id in self.last_guess_time and current_time - self.last_guess_time[user.id] < 2:
-            return "cooldown"
             
-        self.last_guess_time[user.id] = current_time
         self.guessed_users[user.id] = guess
         
         if guess == self.target:
@@ -135,10 +128,10 @@ async def start_giveaway(
     overwrite = interaction.channel.overwrites_for(interaction.guild.default_role)
     overwrite.send_messages = True
     await interaction.channel.set_permissions(interaction.guild.default_role, overwrite=overwrite)
-    await interaction.channel.edit(slowmode_delay=0)  # No slowmode, we handle cooldown in code
+    await interaction.channel.edit(slowmode_delay=2)  # 2 second slowmode
 
     embed = discord.Embed(
-        title="🎉 𝒢𝒾𝓋𝑒𝒶𝓌𝒶𝓎 𝒩𝓊𝓂𝒷𝑒𝓇 𝒢𝒶𝓂𝑒 🎉",
+        title="🎉 𝒢𝒾𝓋𝑒𝒶�𝓌𝒶𝓎 𝒩𝓊𝓂𝒷𝑒𝓇 𝒢𝒶𝓂𝑒 🎉",
         description=(
             f"**Hosted by:** {hoster.mention}\n"
             f"**Range:** {low}-{high}\n"
@@ -147,14 +140,13 @@ async def start_giveaway(
             f"**Duration:** {'No time limit' if duration == 0 else f'{duration} minute(s)'}\n\n"
             f"**Rules:**\n"
             f"- Guess a number between {low} and {high}\n"
-            f"- 2 second cooldown between guesses\n"
             f"- Host cannot win\n"
             f"- Unlimited guesses!\n\n"
             f"Use `/stop_giveaway` or DM the host to end early"
         ),
         color=discord.Color.gold()
     )
-    embed.set_footer(text="-- 𝒢𝒾𝓋𝑒𝒶𝓌𝒶𝓎 𝒩𝓊�𝒷𝑒𝓇 𝒢𝒶𝓂𝑒 --")
+    embed.set_footer(text="-- 𝒢𝒾𝓋𝑒𝒶𝓌𝒶𝓎 𝒩𝓊𝓂𝒷𝑒𝓇 𝒢𝒶𝓂𝑒 --")
 
     await interaction.response.send_message(embed=embed)
 
@@ -214,10 +206,7 @@ async def on_message(message):
 
     result = giveaway.check_guess(message.author, guess)
     
-    if result == "cooldown":
-        await message.channel.send(f"{message.author.mention} ⏳ Please wait 2 seconds between guesses!", delete_after=2)
-        return
-    elif result is None:  # Hoster tried to guess
+    if result is None:  # Hoster tried to guess
         await message.channel.send(f"{message.author.mention} ❌ Host cannot participate!", delete_after=5)
         return
     elif result:  # Correct guess
