@@ -1,4 +1,3 @@
-
 import discord
 from discord.ext import commands
 from discord import app_commands
@@ -6,12 +5,14 @@ import asyncio
 import random
 import re
 import os
-
+from dotenv import load_dotenv
 intents = discord.Intents.default()
 intents.messages = True
 intents.guilds = True
 intents.members = True
 intents.message_content = True
+load_dotenv()
+TOKEN = os.getenv("DISCORD_BOT_TOKEN")
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 tree = bot.tree
@@ -165,4 +166,4 @@ async def end_giveaway(channel):
     await channel.edit(slowmode_delay=0)
     active_giveaway = None
 
-bot.run(os.getenv("BOT_TOKEN"))
+bot.run(TOKEN)
