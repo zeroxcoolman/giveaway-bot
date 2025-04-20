@@ -16,25 +16,38 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 tree = bot.tree
 
 GIVEAWAY_CHANNEL_NAME = "🎁︱𝒩𝓊𝓂𝒷𝑒𝓇-𝒢𝒾𝓋𝑒𝒶𝓌𝒶𝓎"
-ADMIN_ROLES = ["𝓞𝔀𝓷𝓮𝓻 👑", "𓂀 𝒞𝑜-𝒪𝓌𝓃𝑒𝓇 𓂀✅", "Administrator™🌟"]
+ADMIN_ROLES = ["𝓞𝔀𝓷𝓮𝓻 👑", "𓂀 𝒞𝑜-𝒪𝓌𝓷𝓮𝓇 𓂀✅", "Administrator™🌟"]
 
-active_giveaway = None
+active_giveaways = {}  # {channel_id: Giveaway}
 
 class Giveaway:
-    def __init__(self, hoster, prize, winners, number_range, target, duration):
+    def __init__(self, hoster, prize, winners, number_range, target, duration, channel):
         self.hoster = hoster
         self.prize = prize
         self.winners_required = winners
         self.low, self.high = number_range
         self.target = target
         self.duration = duration
+        self.channel = channel
         self.winners = set()
         self.guessed_users = {}
+        self.last_guess_time = {}
+        self.end_time = asyncio.get_event_loop().time() + (duration * 60 if duration > 0 else float('inf'))
+        self.task = None
 
     def check_guess(self, user, guess):
-        if user.id in self.guessed_users:
-            return None  # Already guessed
+        # Prevent hoster from winning
+        if user.id == self.hoster.id:
+            return None
+        
+        # Check cooldown
+        current_time = asyncio.get_event_loop().time()
+        if user.id in self.last_guess_time and current_time - self.last_guess_time[user.id] < 2:
+            return "cooldown"
+            
+        self.last_guess_time[user.id] = current_time
         self.guessed_users[user.id] = guess
+        
         if guess == self.target:
             self.winners.add(user)
             return True
@@ -52,6 +65,29 @@ async def on_ready():
 def has_admin_role(member):
     return any(role.name in ADMIN_ROLES for role in member.roles)
 
+async def end_giveaway(giveaway):
+    global active_giveaways
+    
+    if giveaway.task and not giveaway.task.done():
+        giveaway.task.cancel()
+    
+    winners = ", ".join(w.mention for w in giveaway.winners) if giveaway.winners else "No winners"
+
+    embed = discord.Embed(
+        title="🎉 Giveaway Ended!",
+        description=f"**Prize:** {giveaway.prize}\n**Target Number:** {giveaway.target}\n**Winners:** {winners}",
+        color=discord.Color.green()
+    )
+    await giveaway.channel.send(embed=embed)
+
+    # Lock channel
+    overwrite = giveaway.channel.overwrites_for(giveaway.channel.guild.default_role)
+    overwrite.send_messages = False
+    await giveaway.channel.set_permissions(giveaway.channel.guild.default_role, overwrite=overwrite)
+    
+    if giveaway.channel.id in active_giveaways:
+        del active_giveaways[giveaway.channel.id]
+
 @tree.command(name="giveaway", description="Start a number guessing giveaway!")
 @app_commands.describe(
     winners="Number of winners",
@@ -61,7 +97,7 @@ def has_admin_role(member):
     duration="Duration (in minutes, optional)",
     target="Target number (optional, leave blank for random)"
 )
-async def giveaway(
+async def start_giveaway(
     interaction: discord.Interaction,
     winners: int,
     prize: str,
@@ -70,10 +106,13 @@ async def giveaway(
     duration: int = 0,
     target: int = None
 ):
-    global active_giveaway
+    global active_giveaways
 
     if interaction.channel.name != GIVEAWAY_CHANNEL_NAME and not has_admin_role(interaction.user):
         return await interaction.response.send_message("❌ Use this command in the giveaway channel.", ephemeral=True)
+
+    if interaction.channel.id in active_giveaways:
+        return await interaction.response.send_message("❌ There's already an active giveaway in this channel!", ephemeral=True)
 
     match = re.match(r"(\d+)-(\d+)", range_)
     if not match:
@@ -89,79 +128,106 @@ async def giveaway(
     if target is None:
         target = random.randint(low, high)
 
-    active_giveaway = Giveaway(hoster, prize, winners, (low, high), target, duration)
+    giveaway = Giveaway(hoster, prize, winners, (low, high), target, duration, interaction.channel)
+    active_giveaways[interaction.channel.id] = giveaway
 
     # Permissions
     overwrite = interaction.channel.overwrites_for(interaction.guild.default_role)
     overwrite.send_messages = True
     await interaction.channel.set_permissions(interaction.guild.default_role, overwrite=overwrite)
-    await interaction.channel.edit(slowmode_delay=5)
+    await interaction.channel.edit(slowmode_delay=0)  # No slowmode, we handle cooldown in code
 
     embed = discord.Embed(
         title="🎉 𝒢𝒾𝓋𝑒𝒶𝓌𝒶𝓎 𝒩𝓊𝓂𝒷𝑒𝓇 𝒢𝒶𝓂𝑒 🎉",
         description=(
-            f"**DM:** {hoster.mention}\n"
+            f"**Hosted by:** {hoster.mention}\n"
             f"**Range:** {low}-{high}\n"
             f"**Winners:** {winners}\n"
             f"**Prize:** {prize}\n"
-            f"**Duration:** {'No time limit' if duration == 0 else f'{duration} minute(s)'}"
+            f"**Duration:** {'No time limit' if duration == 0 else f'{duration} minute(s)'}\n\n"
+            f"**Rules:**\n"
+            f"- Guess a number between {low} and {high}\n"
+            f"- 2 second cooldown between guesses\n"
+            f"- Host cannot win\n"
+            f"- Unlimited guesses!\n\n"
+            f"Use `/stop_giveaway` or DM the host to end early"
         ),
         color=discord.Color.gold()
     )
-    embed.set_footer(text="-- 𝒢𝒾𝓋𝑒𝒶𝓌𝒶𝓎 𝒩𝓊𝓂𝒷𝑒𝓇 𝒢𝒶𝓂𝑒 --")
+    embed.set_footer(text="-- 𝒢𝒾𝓋𝑒𝒶𝓌𝒶𝓎 𝒩𝓊�𝒷𝑒𝓇 𝒢𝒶𝓂𝑒 --")
 
     await interaction.response.send_message(embed=embed)
 
     if duration > 0:
-        await asyncio.sleep(duration * 60)
-        await end_giveaway(interaction.channel)
+        giveaway.task = asyncio.create_task(schedule_giveaway_end(giveaway))
+
+async def schedule_giveaway_end(giveaway):
+    try:
+        await asyncio.sleep(giveaway.duration * 60)
+        if giveaway.channel.id in active_giveaways:  # Check if giveaway still exists
+            await end_giveaway(giveaway)
+    except asyncio.CancelledError:
+        pass
+
+@tree.command(name="stop_giveaway", description="Stop the current giveaway in this channel")
+async def stop_giveaway(interaction: discord.Interaction):
+    if interaction.channel.id not in active_giveaways:
+        return await interaction.response.send_message("❌ No active giveaway in this channel!", ephemeral=True)
+
+    giveaway = active_giveaways[interaction.channel.id]
+    
+    # Only hoster or admins can stop
+    if interaction.user.id != giveaway.hoster.id and not has_admin_role(interaction.user):
+        return await interaction.response.send_message("❌ Only the giveaway hoster can stop this!", ephemeral=True)
+
+    await interaction.response.send_message("🛑 Giveaway is being stopped...")
+    await end_giveaway(giveaway)
 
 @bot.event
 async def on_message(message):
-    global active_giveaway
-
-    if message.author.bot or active_giveaway is None:
+    if message.author.bot:
         return
 
-    if message.channel.name != GIVEAWAY_CHANNEL_NAME:
+    # Handle DM to hoster to stop giveaway
+    if isinstance(message.channel, discord.DMChannel):
+        for giveaway in active_giveaways.values():
+            if message.author.id == giveaway.hoster.id and message.content.lower() in ["stop", "end", "cancel"]:
+                await message.channel.send("🛑 Giveaway is being stopped...")
+                await end_giveaway(giveaway)
+                return
         return
+
+    # Handle guesses in giveaway channels
+    if message.channel.id not in active_giveaways:
+        return
+
+    giveaway = active_giveaways[message.channel.id]
 
     try:
         guess = int(message.content.strip())
     except ValueError:
         return
 
-    if guess < active_giveaway.low or guess > active_giveaway.high:
+    if guess < giveaway.low or guess > giveaway.high:
         await message.channel.send(f"{message.author.mention} ❌ Guess out of range!", delete_after=5)
         return
 
-    if message.author.id in active_giveaway.guessed_users:
-        await message.channel.send(f"{message.author.mention} ⚠️ You already guessed!", delete_after=5)
+    result = giveaway.check_guess(message.author, guess)
+    
+    if result == "cooldown":
+        await message.channel.send(f"{message.author.mention} ⏳ Please wait 2 seconds between guesses!", delete_after=2)
         return
-
-    correct = active_giveaway.check_guess(message.author, guess)
-
-    if correct:
+    elif result is None:  # Hoster tried to guess
+        await message.channel.send(f"{message.author.mention} ❌ Host cannot participate!", delete_after=5)
+        return
+    elif result:  # Correct guess
         await message.channel.send(f"🎉 {message.author.mention} guessed correctly!")
         try:
-            await message.author.send(f"🎉 You won the **{active_giveaway.prize}** giveaway!")
+            await message.author.send(f"🎉 You won the **{giveaway.prize}** giveaway!")
         except:
             pass  # Can't DM
 
-        if len(active_giveaway.winners) >= active_giveaway.winners_required:
-            await end_giveaway(message.channel)
-
-async def end_giveaway(channel):
-    global active_giveaway
-    winners = ", ".join(w.mention for w in active_giveaway.winners) if active_giveaway.winners else "No winners"
-
-    await channel.send(f"🔒 Giveaway ended! Winners: {winners}")
-
-    # Lock and reset
-    overwrite = channel.overwrites_for(channel.guild.default_role)
-    overwrite.send_messages = False
-    await channel.set_permissions(channel.guild.default_role, overwrite=overwrite)
-    await channel.edit(slowmode_delay=0)
-    active_giveaway = None
+        if len(giveaway.winners) >= giveaway.winners_required:
+            await end_giveaway(giveaway)
 
 bot.run(os.getenv("BOT_TOKEN"))
