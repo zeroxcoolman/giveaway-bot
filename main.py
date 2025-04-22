@@ -5,8 +5,6 @@ import asyncio
 import random
 import re
 import os
-import aiohttp
-from bs4 import BeautifulSoup
 
 intents = discord.Intents.default()
 intents.messages = True
@@ -18,10 +16,7 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 tree = bot.tree
 
 GIVEAWAY_CHANNEL_NAME = "🎁︱𝒩𝓊𝓂𝒷𝑒𝓇-𝒢𝒾𝓋𝑒𝒶𝓌𝒶𝓎"
-QUESTIONS_CHANNEL_NAME = "❓︱questions"
 ADMIN_ROLES = ["𝓞𝔀𝓷𝓮𝓻 👑", "𓂀 𝒞𝑜-𝒪𝓌𝓷𝓮𝓇 𓂀✅", "Administrator™🌟"]
-FISCHIPEDIA_BASE_URL = "https://fischipedia.com/wiki/"
-PROGRESSION_GUIDE_URL = "https://fischipedia.org/wiki/Progression_Guide#/media/File:Progress_Tiers.png"
 
 active_giveaways = {}  # {channel_id: Giveaway}
 
@@ -36,6 +31,7 @@ class Giveaway:
         self.channel = channel
         self.winners = set()
         self.guessed_users = {}
+        self.last_guess_time = {}
         self.end_time = asyncio.get_event_loop().time() + (duration * 60 if duration > 0 else float('inf'))
         self.task = None
 
@@ -43,7 +39,13 @@ class Giveaway:
         # Prevent hoster from winning
         if user.id == self.hoster.id:
             return None
+        
+        # Check cooldown
+        current_time = asyncio.get_event_loop().time()
+        if user.id in self.last_guess_time and current_time - self.last_guess_time[user.id] < 2:
+            return "cooldown"
             
+        self.last_guess_time[user.id] = current_time
         self.guessed_users[user.id] = guess
         
         if guess == self.target:
@@ -107,7 +109,7 @@ async def start_giveaway(
     global active_giveaways
 
     if interaction.channel.name != GIVEAWAY_CHANNEL_NAME and not has_admin_role(interaction.user):
-        return await interaction.response.send_message(f"❌ Use this command in the {GIVEAWAY_CHANNEL_NAME} channel.", ephemeral=True)
+        return await interaction.response.send_message("❌ Use this command in the giveaway channel.", ephemeral=True)
 
     if interaction.channel.id in active_giveaways:
         return await interaction.response.send_message("❌ There's already an active giveaway in this channel!", ephemeral=True)
@@ -133,7 +135,7 @@ async def start_giveaway(
     overwrite = interaction.channel.overwrites_for(interaction.guild.default_role)
     overwrite.send_messages = True
     await interaction.channel.set_permissions(interaction.guild.default_role, overwrite=overwrite)
-    await interaction.channel.edit(slowmode_delay=2)  # 2 second slowmode
+    await interaction.channel.edit(slowmode_delay=0)  # No slowmode, we handle cooldown in code
 
     embed = discord.Embed(
         title="🎉 𝒢𝒾𝓋𝑒𝒶𝓌𝒶𝓎 𝒩𝓊𝓂𝒷𝑒𝓇 𝒢𝒶𝓂𝑒 🎉",
@@ -145,13 +147,14 @@ async def start_giveaway(
             f"**Duration:** {'No time limit' if duration == 0 else f'{duration} minute(s)'}\n\n"
             f"**Rules:**\n"
             f"- Guess a number between {low} and {high}\n"
+            f"- 2 second cooldown between guesses\n"
             f"- Host cannot win\n"
             f"- Unlimited guesses!\n\n"
             f"Use `/stop_giveaway` or DM the host to end early"
         ),
         color=discord.Color.gold()
     )
-    embed.set_footer(text="-- 𝒢𝒾𝓋𝑒𝒶𝓌𝒶𝓎 𝒩𝓊𝓂𝒷𝑒𝓇 𝒢𝒶𝓂𝑒 --")
+    embed.set_footer(text="-- 𝒢𝒾𝓋𝑒𝒶𝓌𝒶𝓎 𝒩𝓊�𝒷𝑒𝓇 𝒢𝒶𝓂𝑒 --")
 
     await interaction.response.send_message(embed=embed)
 
@@ -179,70 +182,6 @@ async def stop_giveaway(interaction: discord.Interaction):
 
     await interaction.response.send_message("🛑 Giveaway is being stopped...")
     await end_giveaway(giveaway)
-
-async def fetch_rod_summary(query):
-    formatted_query = query.replace(" ", "_")
-    url = f"{FISCHIPEDIA_BASE_URL}{formatted_query}"
-    
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url) as response:
-                if response.status == 200:
-                    html = await response.text()
-                    soup = BeautifulSoup(html, 'html.parser')
-                    
-                    # Try to find the first paragraph of content
-                    summary = ""
-                    content_div = soup.find('div', {'class': 'mw-parser-output'})
-                    if content_div:
-                        for p in content_div.find_all('p'):
-                            if p.text.strip() and not p.find_parent('table'):
-                                summary = p.text.strip()
-                                break
-                    
-                    return url, summary[:300] + "..." if len(summary) > 300 else summary
-                return url, None
-    except:
-        return url, None
-
-@tree.command(name="searchrod", description="Search for fishing rods on Fischipedia")
-@app_commands.describe(query="The rod or fishing item you want to search for")
-async def search_rod(interaction: discord.Interaction, query: str):
-    if interaction.channel.name != QUESTIONS_CHANNEL_NAME and not has_admin_role(interaction.user):
-        return await interaction.response.send_message(f"❌ Use this command in the {QUESTIONS_CHANNEL_NAME} channel.", ephemeral=True)
-
-    await interaction.response.defer()
-    
-    url, summary = await fetch_rod_summary(query)
-    
-    embed = discord.Embed(
-        title=f"🔍 Search Results for: {query}",
-        color=discord.Color.blue()
-    )
-    
-    if summary:
-        embed.description = f"{summary}\n\n[Read more on Fischipedia]({url})"
-    else:
-        embed.description = f"No summary available.\n[View page on Fischipedia]({url})"
-    
-    embed.set_footer(text="Fischipedia Search")
-    
-    await interaction.followup.send(embed=embed)
-
-@tree.command(name="guide", description="Show the fishing progression guide")
-async def show_guide(interaction: discord.Interaction):
-    if interaction.channel.name != QUESTIONS_CHANNEL_NAME and not has_admin_role(interaction.user):
-        return await interaction.response.send_message(f"❌ Use this command in the {QUESTIONS_CHANNEL_NAME} channel.", ephemeral=True)
-
-    embed = discord.Embed(
-        title="🎣 Fishing Progression Guide",
-        description="Here's the fishing progression guide from Fischipedia:",
-        color=discord.Color.green()
-    )
-    embed.set_image(url=PROGRESSION_GUIDE_URL)
-    embed.set_footer(text="Source: Fischipedia.org")
-    
-    await interaction.response.send_message(embed=embed)
 
 @bot.event
 async def on_message(message):
@@ -275,7 +214,10 @@ async def on_message(message):
 
     result = giveaway.check_guess(message.author, guess)
     
-    if result is None:  # Hoster tried to guess
+    if result == "cooldown":
+        await message.channel.send(f"{message.author.mention} ⏳ Please wait 2 seconds between guesses!", delete_after=2)
+        return
+    elif result is None:  # Hoster tried to guess
         await message.channel.send(f"{message.author.mention} ❌ Host cannot participate!", delete_after=5)
         return
     elif result:  # Correct guess
