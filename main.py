@@ -5,6 +5,8 @@ import asyncio
 import random
 import re
 import os
+from discord.app_commands import checks
+from discord.ext.commands import CooldownMapping
 
 intents = discord.Intents.default()
 intents.messages = True
@@ -19,6 +21,7 @@ GIVEAWAY_CHANNEL_NAME = "🎁︱𝒩𝓊𝓂𝒷𝑒𝓇-𝒢𝒾𝓋𝑒𝒶�
 ADMIN_ROLES = ["𝓞𝔀𝓷𝓮𝓻 👑", "𓂀 𝒞𝑜-𝒪𝓌𝓷𝓮𝓇 𓂀✅", "Administrator™🌟"]
 
 active_giveaways = {}  # {channel_id: Giveaway}
+giveaway_cooldown = CooldownMapping.from_cooldown(1, 2.0, commands.BucketType.user)  # 1 guess per 2 seconds per user
 
 class Giveaway:
     def __init__(self, hoster, prize, winners, number_range, target, duration, channel):
@@ -31,7 +34,6 @@ class Giveaway:
         self.channel = channel
         self.winners = set()
         self.guessed_users = {}
-        self.last_guess_time = {}
         self.end_time = asyncio.get_event_loop().time() + (duration * 60 if duration > 0 else float('inf'))
         self.task = None
 
@@ -39,13 +41,7 @@ class Giveaway:
         # Prevent hoster from winning
         if user.id == self.hoster.id:
             return None
-        
-        # Check cooldown
-        current_time = asyncio.get_event_loop().time()
-        if user.id in self.last_guess_time and current_time - self.last_guess_time[user.id] < 2:
-            return "cooldown"
             
-        self.last_guess_time[user.id] = current_time
         self.guessed_users[user.id] = guess
         
         if guess == self.target:
@@ -57,8 +53,8 @@ class Giveaway:
 async def on_ready():
     print(f"Logged in as {bot.user}")
     try:
-        await tree.sync()
-        print("Synced commands")
+        synced = await tree.sync()
+        print(f"Synced {len(synced)} commands")
     except Exception as e:
         print("Sync failed:", e)
 
@@ -135,7 +131,7 @@ async def start_giveaway(
     overwrite = interaction.channel.overwrites_for(interaction.guild.default_role)
     overwrite.send_messages = True
     await interaction.channel.set_permissions(interaction.guild.default_role, overwrite=overwrite)
-    await interaction.channel.edit(slowmode_delay=0)  # No slowmode, we handle cooldown in code
+    await interaction.channel.edit(slowmode_delay=0)  # No slowmode, using Discord's cooldown system
 
     embed = discord.Embed(
         title="🎉 𝒢𝒾𝓋𝑒𝒶𝓌𝒶𝓎 𝒩𝓊𝓂𝒷𝑒𝓇 𝒢𝒶𝓂𝑒 🎉",
@@ -154,7 +150,7 @@ async def start_giveaway(
         ),
         color=discord.Color.gold()
     )
-    embed.set_footer(text="-- 𝒢𝒾𝓋𝑒𝒶𝓌𝒶𝓎 𝒩𝓊�𝒷𝑒𝓇 𝒢𝒶𝓂𝑒 --")
+    embed.set_footer(text="-- 𝒢𝒾𝓋𝑒𝒶𝓌𝒶𝓎 𝒩𝓊𝓂𝒷𝑒𝓇 𝒢𝒶𝓂𝑒 --")
 
     await interaction.response.send_message(embed=embed)
 
@@ -164,7 +160,7 @@ async def start_giveaway(
 async def schedule_giveaway_end(giveaway):
     try:
         await asyncio.sleep(giveaway.duration * 60)
-        if giveaway.channel.id in active_giveaways:  # Check if giveaway still exists
+        if giveaway.channel.id in active_giveaways:
             await end_giveaway(giveaway)
     except asyncio.CancelledError:
         pass
@@ -176,7 +172,6 @@ async def stop_giveaway(interaction: discord.Interaction):
 
     giveaway = active_giveaways[interaction.channel.id]
     
-    # Only hoster or admins can stop
     if interaction.user.id != giveaway.hoster.id and not has_admin_role(interaction.user):
         return await interaction.response.send_message("❌ Only the giveaway hoster can stop this!", ephemeral=True)
 
@@ -201,6 +196,12 @@ async def on_message(message):
     if message.channel.id not in active_giveaways:
         return
 
+    # Discord-managed cooldown check
+    bucket = giveaway_cooldown.get_bucket(message)
+    if bucket.update_rate_limit():
+        await message.channel.send(f"{message.author.mention} ⏳ Please wait 2 seconds between guesses!", delete_after=2)
+        return
+
     giveaway = active_giveaways[message.channel.id]
 
     try:
@@ -214,10 +215,7 @@ async def on_message(message):
 
     result = giveaway.check_guess(message.author, guess)
     
-    if result == "cooldown":
-        await message.channel.send(f"{message.author.mention} ⏳ Please wait 2 seconds between guesses!", delete_after=2)
-        return
-    elif result is None:  # Hoster tried to guess
+    if result is None:  # Hoster tried to guess
         await message.channel.send(f"{message.author.mention} ❌ Host cannot participate!", delete_after=5)
         return
     elif result:  # Correct guess
