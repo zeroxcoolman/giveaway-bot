@@ -56,20 +56,33 @@ async def end_giveaway(giveaway):
     if giveaway.task:
         giveaway.task.cancel()
     
-    winners = ", ".join(w.mention for w in giveaway.winners) if giveaway.winners else "No winners"
+    # DM all winners
+    for winner in giveaway.winners:
+        try:
+            await winner.send(
+                f"🎉 You won the giveaway in {giveaway.channel.mention}!\n"
+                f"**Prize:** {giveaway.prize}\n"
+                f"Contact {giveaway.hoster.mention} to claim your reward!"
+            )
+        except:
+            pass  # Couldn't DM user
+    
+    # Announce winners in channel
+    winners_text = ", ".join(w.mention for w in giveaway.winners) if giveaway.winners else "No winners"
     embed = discord.Embed(
         title="🎉 Giveaway Ended",
-        description=f"**Prize:** {giveaway.prize}\n**Target:** {giveaway.target}\n**Winners:** {winners}",
+        description=f"**Prize:** {giveaway.prize}\n**Target:** {giveaway.target}\n**Winners:** {winners_text}",
         color=discord.Color.green()
     )
     await giveaway.channel.send(embed=embed)
     
-    # Reset channel permissions
+    # Reset channel
     await giveaway.channel.set_permissions(
         giveaway.channel.guild.default_role,
         send_messages=False
     )
-    del active_giveaways[giveaway.channel.id]
+    if giveaway.channel.id in active_giveaways:
+        del active_giveaways[giveaway.channel.id]
 
 @tree.command(name="giveaway", description="Start a number guessing giveaway")
 @app_commands.describe(
@@ -112,7 +125,7 @@ async def start_giveaway(
         interaction.guild.default_role,
         send_messages=True
     )
-    await interaction.channel.edit(slowmode_delay=2)  # Discord enforces 2-second cooldown
+    await interaction.channel.edit(slowmode_delay=2)  # Discord-enforced cooldown
 
     # Post giveaway embed
     embed = discord.Embed(
@@ -127,7 +140,8 @@ async def start_giveaway(
             "1. Guess a number in the range\n"
             "2. 2-second cooldown between guesses\n"
             "3. Host can't win\n"
-            f"4. Use `/stop_giveaway` to end early"
+            f"4. Use `/stop_giveaway` or DM me 'stop' to end early\n\n"
+            "Winners will receive prize details via DM!"
         ),
         color=discord.Color.gold()
     )
@@ -155,6 +169,15 @@ async def stop_giveaway(interaction: discord.Interaction):
 
 @bot.event
 async def on_message(message):
+    # Handle DM stop commands
+    if isinstance(message.channel, discord.DMChannel):
+        for giveaway in list(active_giveaways.values()):
+            if message.author.id == giveaway.hoster.id and message.content.lower() in ["stop", "end", "cancel"]:
+                await message.channel.send("🛑 Stopping your giveaway...")
+                await end_giveaway(giveaway)
+        return
+
+    # Handle guesses in giveaway channels
     if message.author.bot or message.channel.id not in active_giveaways:
         return
 
@@ -165,14 +188,28 @@ async def on_message(message):
     except ValueError:
         return
 
-    # Let Discord's slowmode handle the 2-second cooldown
+    # Range check
     if not (giveaway.low <= guess <= giveaway.high):
-        await message.channel.send(f"{message.author.mention} ❌ Out of range!", delete_after=3)
+        await message.channel.send(f"{message.author.mention} ❌ Must be between {giveaway.low}-{giveaway.high}!", delete_after=3)
         return
 
-    if giveaway.check_guess(message.author, guess):
-        await message.channel.send(f"🎉 {message.author.mention} won!")
+    # Check guess
+    result = giveaway.check_guess(message.author, guess)
+    if result is None:
+        await message.channel.send(f"{message.author.mention} ❌ Hosts can't win!", delete_after=3)
+    elif result:
+        await message.channel.send(f"🎉 {message.author.mention} guessed correctly!")
         giveaway.winners.add(message.author)
+        
+        # Immediate winner DM
+        try:
+            await message.author.send(
+                f"🎊 You guessed the number in {giveaway.channel.mention}!\n"
+                f"**Prize:** {giveaway.prize}\n"
+                f"The host {giveaway.hoster.mention} will contact you soon."
+            )
+        except:
+            await message.channel.send(f"{message.author.mention} Couldn't DM you - enable DMs to receive your prize info!", delete_after=10)
         
         if len(giveaway.winners) >= giveaway.winners_required:
             await end_giveaway(giveaway)
