@@ -6,6 +6,7 @@ import random
 import re
 import os
 import aiohttp
+from bs4 import BeautifulSoup
 
 intents = discord.Intents.default()
 intents.messages = True
@@ -17,6 +18,7 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 tree = bot.tree
 
 GIVEAWAY_CHANNEL_NAME = "🎁︱𝒩𝓊𝓂𝒷𝑒𝓇-𝒢𝒾𝓋𝑒𝒶𝓌𝒶𝓎"
+QUESTIONS_CHANNEL_NAME = "❓︱questions"
 ADMIN_ROLES = ["𝓞𝔀𝓷𝓮𝓻 👑", "𓂀 𝒞𝑜-𝒪𝓌𝓷𝓮𝓇 𓂀✅", "Administrator™🌟"]
 FISCHIPEDIA_BASE_URL = "https://fischipedia.com/wiki/"
 PROGRESSION_GUIDE_URL = "https://fischipedia.org/wiki/Progression_Guide#/media/File:Progress_Tiers.png"
@@ -105,7 +107,7 @@ async def start_giveaway(
     global active_giveaways
 
     if interaction.channel.name != GIVEAWAY_CHANNEL_NAME and not has_admin_role(interaction.user):
-        return await interaction.response.send_message("❌ Use this command in the giveaway channel.", ephemeral=True)
+        return await interaction.response.send_message(f"❌ Use this command in the {GIVEAWAY_CHANNEL_NAME} channel.", ephemeral=True)
 
     if interaction.channel.id in active_giveaways:
         return await interaction.response.send_message("❌ There's already an active giveaway in this channel!", ephemeral=True)
@@ -134,7 +136,7 @@ async def start_giveaway(
     await interaction.channel.edit(slowmode_delay=2)  # 2 second slowmode
 
     embed = discord.Embed(
-        title="🎉 𝒢𝒾𝓋𝑒𝒶��𝓌𝒶𝓎 𝒩𝓊𝓂𝒷𝑒𝓇 𝒢𝒶𝓂𝑒 🎉",
+        title="🎉 𝒢𝒾𝓋𝑒𝒶𝓌𝒶𝓎 𝒩𝓊𝓂𝒷𝑒𝓇 𝒢𝒶𝓂𝑒 🎉",
         description=(
             f"**Hosted by:** {hoster.mention}\n"
             f"**Range:** {low}-{high}\n"
@@ -178,24 +180,60 @@ async def stop_giveaway(interaction: discord.Interaction):
     await interaction.response.send_message("🛑 Giveaway is being stopped...")
     await end_giveaway(giveaway)
 
+async def fetch_rod_summary(query):
+    formatted_query = query.replace(" ", "_")
+    url = f"{FISCHIPEDIA_BASE_URL}{formatted_query}"
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as response:
+                if response.status == 200:
+                    html = await response.text()
+                    soup = BeautifulSoup(html, 'html.parser')
+                    
+                    # Try to find the first paragraph of content
+                    summary = ""
+                    content_div = soup.find('div', {'class': 'mw-parser-output'})
+                    if content_div:
+                        for p in content_div.find_all('p'):
+                            if p.text.strip() and not p.find_parent('table'):
+                                summary = p.text.strip()
+                                break
+                    
+                    return url, summary[:300] + "..." if len(summary) > 300 else summary
+                return url, None
+    except:
+        return url, None
+
 @tree.command(name="searchrod", description="Search for fishing rods on Fischipedia")
 @app_commands.describe(query="The rod or fishing item you want to search for")
 async def search_rod(interaction: discord.Interaction, query: str):
-    # Create a URL-friendly version of the query
-    formatted_query = query.replace(" ", "_")
-    search_url = f"{FISCHIPEDIA_BASE_URL}{formatted_query}"
+    if interaction.channel.name != QUESTIONS_CHANNEL_NAME and not has_admin_role(interaction.user):
+        return await interaction.response.send_message(f"❌ Use this command in the {QUESTIONS_CHANNEL_NAME} channel.", ephemeral=True)
+
+    await interaction.response.defer()
+    
+    url, summary = await fetch_rod_summary(query)
     
     embed = discord.Embed(
         title=f"🔍 Search Results for: {query}",
-        description=f"[Click here to view results on Fischipedia]({search_url})",
         color=discord.Color.blue()
     )
+    
+    if summary:
+        embed.description = f"{summary}\n\n[Read more on Fischipedia]({url})"
+    else:
+        embed.description = f"No summary available.\n[View page on Fischipedia]({url})"
+    
     embed.set_footer(text="Fischipedia Search")
     
-    await interaction.response.send_message(embed=embed)
+    await interaction.followup.send(embed=embed)
 
 @tree.command(name="guide", description="Show the fishing progression guide")
 async def show_guide(interaction: discord.Interaction):
+    if interaction.channel.name != QUESTIONS_CHANNEL_NAME and not has_admin_role(interaction.user):
+        return await interaction.response.send_message(f"❌ Use this command in the {QUESTIONS_CHANNEL_NAME} channel.", ephemeral=True)
+
     embed = discord.Embed(
         title="🎣 Fishing Progression Guide",
         description="Here's the fishing progression guide from Fischipedia:",
