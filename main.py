@@ -5,6 +5,7 @@ import asyncio
 import random
 import re
 import os
+import aiohttp
 
 intents = discord.Intents.default()
 intents.messages = True
@@ -17,6 +18,8 @@ tree = bot.tree
 
 GIVEAWAY_CHANNEL_NAME = "🎁︱𝒩𝓊𝓂𝒷𝑒𝓇-𝒢𝒾𝓋𝑒𝒶𝓌𝒶𝓎"
 ADMIN_ROLES = ["𝓞𝔀𝓷𝓮𝓻 👑", "𓂀 𝒞𝑜-𝒪𝓌𝓷𝓮𝓇 𓂀✅", "Administrator™🌟"]
+FISCHIPEDIA_BASE_URL = "https://fischipedia.com/wiki/"
+PROGRESSION_GUIDE_URL = "https://fischipedia.org/wiki/Progression_Guide#/media/File:Progress_Tiers.png"
 
 active_giveaways = {}  # {channel_id: Giveaway}
 
@@ -131,7 +134,7 @@ async def start_giveaway(
     await interaction.channel.edit(slowmode_delay=2)  # 2 second slowmode
 
     embed = discord.Embed(
-        title="🎉 𝒢𝒾𝓋𝑒𝒶�𝓌𝒶𝓎 𝒩𝓊𝓂𝒷𝑒𝓇 𝒢𝒶𝓂𝑒 🎉",
+        title="🎉 𝒢𝒾𝓋𝑒𝒶��𝓌𝒶𝓎 𝒩𝓊𝓂𝒷𝑒𝓇 𝒢𝒶𝓂𝑒 🎉",
         description=(
             f"**Hosted by:** {hoster.mention}\n"
             f"**Range:** {low}-{high}\n"
@@ -174,6 +177,34 @@ async def stop_giveaway(interaction: discord.Interaction):
 
     await interaction.response.send_message("🛑 Giveaway is being stopped...")
     await end_giveaway(giveaway)
+
+@tree.command(name="searchrod", description="Search for fishing rods on Fischipedia")
+@app_commands.describe(query="The rod or fishing item you want to search for")
+async def search_rod(interaction: discord.Interaction, query: str):
+    # Create a URL-friendly version of the query
+    formatted_query = query.replace(" ", "_")
+    search_url = f"{FISCHIPEDIA_BASE_URL}{formatted_query}"
+    
+    embed = discord.Embed(
+        title=f"🔍 Search Results for: {query}",
+        description=f"[Click here to view results on Fischipedia]({search_url})",
+        color=discord.Color.blue()
+    )
+    embed.set_footer(text="Fischipedia Search")
+    
+    await interaction.response.send_message(embed=embed)
+
+@tree.command(name="guide", description="Show the fishing progression guide")
+async def show_guide(interaction: discord.Interaction):
+    embed = discord.Embed(
+        title="🎣 Fishing Progression Guide",
+        description="Here's the fishing progression guide from Fischipedia:",
+        color=discord.Color.green()
+    )
+    embed.set_image(url=PROGRESSION_GUIDE_URL)
+    embed.set_footer(text="Source: Fischipedia.org")
+    
+    await interaction.response.send_message(embed=embed)
 
 @bot.event
 async def on_message(message):
