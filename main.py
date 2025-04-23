@@ -188,7 +188,7 @@ async def guiderods(interaction: discord.Interaction):
         )
     
     # Use the direct image URL instead of wiki page
-    guide_url = "https://fischipedia.org/wiki/File:Progress_Tiers.png"
+    guide_url = "https://fischipedia.org/wiki/Special:FilePath/Progress_Tiers.png"
     
     # Create an embed for better display
     embed = discord.Embed(
@@ -199,6 +199,23 @@ async def guiderods(interaction: discord.Interaction):
     embed.set_image(url=guide_url)
     
     await interaction.response.send_message(embed=embed)
+
+@tree.command(name="searchrod", description="Search for a rod on Fischipedia")
+@app_commands.describe(rod_name="Name of the rod to search for")
+async def searchrod(interaction: discord.Interaction, rod_name: str):
+    if interaction.channel.name != QUESTIONS_CHANNEL_NAME:
+        return await interaction.response.send_message(
+            f"❌ This command can only be used in #{QUESTIONS_CHANNEL_NAME}!",
+            ephemeral=True
+        )
+    
+    # Properly encoded search URL
+    encoded_rod = urllib.parse.quote(rod_name)
+    search_url = f"https://fischipedia.org/w/index.php?search={encoded_rod}&title=Special:Search&go=Go"
+    
+    await interaction.response.send_message(
+        f"🔍 Search results for '{rod_name}':\n{search_url}"
+    )
 
 @bot.event
 async def on_message(message):
