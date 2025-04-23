@@ -17,7 +17,7 @@ tree = bot.tree
 
 GIVEAWAY_CHANNEL_NAME = "🎁︱𝒩𝓊𝓂𝒷𝑒𝓇-𝒢𝒾𝓋𝑒𝒶𝓌𝒶𝓎"
 QUESTIONS_CHANNEL_NAME = "❓︱questions"
-ADMIN_ROLES = ["𝓞𝔀𝓷𝓮𝓻 👑", "𓂀 𝒞𝑜-𝒪𝓌𝓃𝑒𝓇 𓂀✅", "Administrator™🌟"]
+ADMIN_ROLES = ["𝓞𝔀𝓷𝓮𝓻 👑", "𓂀 𝒞𝑜-𝒪𝓌𝓷𝓮𝓻 𓂀✅", "Administrator™🌟"]
 
 active_giveaways = {}  # {channel_id: Giveaway}
 
@@ -45,8 +45,8 @@ class Giveaway:
 async def on_ready():
     print(f"Logged in as {bot.user}")
     try:
-        await tree.sync()
-        print("Commands synced")
+        synced = await tree.sync()
+        print(f"Synced {len(synced)} commands: {[cmd.name for cmd in synced]}")
     except Exception as e:
         print("Sync error:", e)
 
@@ -126,7 +126,7 @@ async def start_giveaway(
         interaction.guild.default_role,
         send_messages=True
     )
-    await interaction.channel.edit(slowmode_delay=2)  # Discord-enforced cooldown
+    await interaction.channel.edit(slowmode_delay=2)
 
     # Post giveaway embed
     embed = discord.Embed(
@@ -168,31 +168,31 @@ async def stop_giveaway(interaction: discord.Interaction):
     await interaction.response.send_message("🛑 Ending giveaway...")
     await end_giveaway(giveaway)
 
-@tree.command(name="searchrod", description="Search for a rod on Fischipedia")
-@app_commands.describe(rod_name="Name of the rod to search for")
-async def searchrod(interaction: discord.Interaction, rod_name: str):
+@tree.command(name="guiderods", description="Get the Fishing Progression Guide")
+async def guiderods(interaction: discord.Interaction):
     if interaction.channel.name != QUESTIONS_CHANNEL_NAME:
         return await interaction.response.send_message(
-            f"❌ This command can only be used in the #{QUESTIONS_CHANNEL_NAME} channel!",
-            ephemeral=True
-        )
-    
-    search_url = f"https://fischipedia.com/search?q={rod_name.replace(' ', '+')}"
-    await interaction.response.send_message(
-        f"🔍 Search results for **{rod_name}**:\n{search_url}"
-    )
-
-@tree.command(name="guide", description="Get the Fishing Progression Guide")
-async def guide(interaction: discord.Interaction):
-    if interaction.channel.name != QUESTIONS_CHANNEL_NAME:
-        return await interaction.response.send_message(
-            f"❌ This command can only be used in the #{QUESTIONS_CHANNEL_NAME} channel!",
+            f"❌ This command can only be used in #{QUESTIONS_CHANNEL_NAME}!",
             ephemeral=True
         )
     
     guide_url = "https://fischipedia.org/wiki/Progression_Guide#/media/File:Progress_Tiers.png"
     await interaction.response.send_message(
-        f"📖 **Fishing Progression Guide**:\n{guide_url}"
+        f"🎣 **Fishing Rod Progression Guide**:\n{guide_url}"
+    )
+
+@tree.command(name="searchrod", description="Search for a rod on Fischipedia")
+@app_commands.describe(rod_name="Name of the rod to search for")
+async def searchrod(interaction: discord.Interaction, rod_name: str):
+    if interaction.channel.name != QUESTIONS_CHANNEL_NAME:
+        return await interaction.response.send_message(
+            f"❌ This command can only be used in #{QUESTIONS_CHANNEL_NAME}!",
+            ephemeral=True
+        )
+    
+    search_url = f"https://fischipedia.com/search?q={rod_name.replace(' ', '+')}"
+    await interaction.response.send_message(
+        f"🔍 **Search results for '{rod_name}'**:\n{search_url}"
     )
 
 @bot.event
