@@ -5,6 +5,7 @@ import asyncio
 import random
 import re
 import os
+import urllib.parse  # Added for proper URL encoding
 
 intents = discord.Intents.default()
 intents.messages = True
@@ -190,7 +191,10 @@ async def searchrod(interaction: discord.Interaction, rod_name: str):
             ephemeral=True
         )
     
-    search_url = f"https://fischipedia.com/search?q={rod_name.replace(' ', '+')}"
+    # Properly encoded search URL
+    encoded_rod = urllib.parse.quote(rod_name)
+    search_url = f"https://fischipedia.org/w/index.php?search={encoded_rod}&title=Special:Search&go=Go"
+    
     await interaction.response.send_message(
         f"🔍 **Search results for '{rod_name}'**:\n{search_url}"
     )
