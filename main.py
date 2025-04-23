@@ -181,19 +181,6 @@ async def guiderods(interaction: discord.Interaction):
             ephemeral=True
         )
     
-    guide_url = "https://fischipedia.org/wiki/Progression_Guide#/media/File:Progress_Tiers.png"
-    await interaction.response.send_message(
-        f"🎣 **Fishing Rod Progression Guide**:\n{guide_url}"
-    )
-
-@tree.command(name="guiderods", description="Get the Fishing Progression Guide")
-async def guiderods(interaction: discord.Interaction):
-    if interaction.channel.name != QUESTIONS_CHANNEL_NAME:
-        return await interaction.response.send_message(
-            f"❌ This command can only be used in #{QUESTIONS_CHANNEL_NAME}!",
-            ephemeral=True
-        )
-    
     # Use the direct image URL instead of wiki page
     guide_url = "https://fischipedia.org/wiki/File:Progress_Tiers.png"
     
