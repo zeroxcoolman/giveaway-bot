@@ -46,13 +46,20 @@ class Giveaway:
 async def on_ready():
     print(f"Logged in as {bot.user} (ID: {bot.user.id})")
     print("------")
-    # YOU FOUND AN EASTER EGG: EIEIEIEIIEIIEIEIIEIEIEIIEEIEIIEIEIIEI
-    # First sync with Discord
+    
+    # Wait a brief moment before syncing
+    await asyncio.sleep(2)
+    
     try:
+        # Sync commands globally
         synced = await tree.sync()
         print(f"Synced {len(synced)} commands: {[cmd.name for cmd in synced]}")
+        
+        # Additional verification
+        registered = [cmd.name for cmd in tree.get_commands()]
+        print(f"Registered commands: {registered}")
     except Exception as e:
-        print(f"Failed to sync commands: {e}")
+        print(f"Command sync error: {e}")
 
 def has_admin_role(member):
     return any(role.name in ADMIN_ROLES for role in member.roles)
