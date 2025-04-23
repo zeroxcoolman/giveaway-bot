@@ -5,7 +5,7 @@ import asyncio
 import random
 import re
 import os
-import urllib.parse  # Added for proper URL encoding
+import urllib.parse
 
 intents = discord.Intents.default()
 intents.messages = True
@@ -47,17 +47,12 @@ async def on_ready():
     print(f"Logged in as {bot.user} (ID: {bot.user.id})")
     print("------")
     
-    # Wait a brief moment before syncing
     await asyncio.sleep(2)
     
     try:
-        # Sync commands globally
         synced = await tree.sync()
         print(f"Synced {len(synced)} commands: {[cmd.name for cmd in synced]}")
-        
-        # Additional verification
-        registered = [cmd.name for cmd in tree.get_commands()]
-        print(f"Registered commands: {registered}")
+        print(f"Registered commands: {[cmd.name for cmd in tree.get_commands()]}")
     except Exception as e:
         print(f"Command sync error: {e}")
 
@@ -68,7 +63,6 @@ async def end_giveaway(giveaway):
     if giveaway.task:
         giveaway.task.cancel()
     
-    # DM all winners
     for winner in giveaway.winners:
         try:
             await winner.send(
@@ -77,9 +71,8 @@ async def end_giveaway(giveaway):
                 f"Contact {giveaway.hoster.mention} to claim your reward!"
             )
         except:
-            pass  # Couldn't DM user
+            pass
     
-    # Announce winners in channel
     winners_text = ", ".join(w.mention for w in giveaway.winners) if giveaway.winners else "No winners"
     embed = discord.Embed(
         title="🎉 Giveaway Ended",
@@ -88,7 +81,6 @@ async def end_giveaway(giveaway):
     )
     await giveaway.channel.send(embed=embed)
     
-    # Reset channel
     await giveaway.channel.set_permissions(
         giveaway.channel.guild.default_role,
         send_messages=False
@@ -105,41 +97,32 @@ async def end_giveaway(giveaway):
     duration="Duration in minutes (0=no limit)",
     target="Target number (random if empty)"
 )
-async def start_giveaway(
-    interaction: discord.Interaction,
-    winners: int,
-    prize: str,
-    range_: str,
-    hoster: discord.Member,
-    duration: int = 0,
-    target: int = None
-):
+async def start_giveaway(interaction: discord.Interaction, winners: int, prize: str, range_: str,
+                        hoster: discord.Member, duration: int = 0, target: int = None):
+    await interaction.response.defer()
+    
     if interaction.channel.name != GIVEAWAY_CHANNEL_NAME and not has_admin_role(interaction.user):
-        return await interaction.response.send_message("❌ Use the giveaway channel!", ephemeral=True)
+        return await interaction.followup.send("❌ Use the giveaway channel!", ephemeral=True)
 
     if interaction.channel.id in active_giveaways:
-        return await interaction.response.send_message("❌ Giveaway already running here!", ephemeral=True)
+        return await interaction.followup.send("❌ Giveaway already running here!", ephemeral=True)
 
-    # Parse range
     match = re.match(r"(\d+)-(\d+)", range_)
     if not match or int(match[1]) >= int(match[2]):
-        return await interaction.response.send_message("❌ Invalid range (use format like 1-100)", ephemeral=True)
+        return await interaction.followup.send("❌ Invalid range (use format like 1-100)", ephemeral=True)
 
     low, high = int(match[1]), int(match[2])
     target = target or random.randint(low, high)
 
-    # Setup giveaway
     giveaway = Giveaway(hoster, prize, winners, (low, high), target, duration, interaction.channel)
     active_giveaways[interaction.channel.id] = giveaway
 
-    # Enable channel with 2-second slowmode
     await interaction.channel.set_permissions(
         interaction.guild.default_role,
         send_messages=True
     )
     await interaction.channel.edit(slowmode_delay=2)
 
-    # Post giveaway embed
     embed = discord.Embed(
         title="🎉 NUMBER GUESS GIVEAWAY",
         description=(
@@ -157,7 +140,7 @@ async def start_giveaway(
         ),
         color=discord.Color.gold()
     )
-    await interaction.response.send_message(embed=embed)
+    await interaction.followup.send(embed=embed)
 
     if duration > 0:
         giveaway.task = asyncio.create_task(schedule_giveaway_end(giveaway))
@@ -169,57 +152,54 @@ async def schedule_giveaway_end(giveaway):
 
 @tree.command(name="stop_giveaway", description="End the current giveaway")
 async def stop_giveaway(interaction: discord.Interaction):
+    await interaction.response.defer()
+    
     giveaway = active_giveaways.get(interaction.channel.id)
     if not giveaway:
-        return await interaction.response.send_message("❌ No active giveaway here", ephemeral=True)
+        return await interaction.followup.send("❌ No active giveaway here", ephemeral=True)
     
     if interaction.user.id != giveaway.hoster.id and not has_admin_role(interaction.user):
-        return await interaction.response.send_message("❌ Only the host can stop this", ephemeral=True)
+        return await interaction.followup.send("❌ Only the host can stop this", ephemeral=True)
 
-    await interaction.response.send_message("🛑 Ending giveaway...")
+    await interaction.followup.send("🛑 Ending giveaway...")
     await end_giveaway(giveaway)
 
 @tree.command(name="guiderods", description="Get the Fishing Progression Guide")
 async def guiderods(interaction: discord.Interaction):
+    await interaction.response.defer()
+    
     if interaction.channel.name != QUESTIONS_CHANNEL_NAME:
-        return await interaction.response.send_message(
+        return await interaction.followup.send(
             f"❌ This command can only be used in #{QUESTIONS_CHANNEL_NAME}!",
             ephemeral=True
         )
     
-    # Use the direct image URL instead of wiki page
-    guide_url = "https://fischipedia.org/wiki/Special:FilePath/Progress_Tiers.png"
-    
-    # Create an embed for better display
     embed = discord.Embed(
         title="🎣 Fishing Rod Progression Guide",
-        description="Here's the complete fishing rod progression:",
         color=discord.Color.blue()
     )
-    embed.set_image(url=guide_url)
-    
-    await interaction.response.send_message(embed=embed)
+    embed.set_image(url="https://fischipedia.org/wiki/Special:FilePath/Progress_Tiers.png")
+    await interaction.followup.send(embed=embed)
 
 @tree.command(name="searchrod", description="Search for a rod on Fischipedia")
 @app_commands.describe(rod_name="Name of the rod to search for")
 async def searchrod(interaction: discord.Interaction, rod_name: str):
+    await interaction.response.defer()
+    
     if interaction.channel.name != QUESTIONS_CHANNEL_NAME:
-        return await interaction.response.send_message(
+        return await interaction.followup.send(
             f"❌ This command can only be used in #{QUESTIONS_CHANNEL_NAME}!",
             ephemeral=True
         )
     
-    # Properly encoded search URL
-    encoded_rod = urllib.parse.quote(rod_name)
-    search_url = f"https://fischipedia.org/w/index.php?search={encoded_rod}&title=Special:Search&go=Go"
-    
-    await interaction.response.send_message(
-        f"🔍 Search results for '{rod_name}':\n{search_url}"
+    safe_name = urllib.parse.quote(rod_name)
+    await interaction.followup.send(
+        f"🔍 Search results for '{rod_name}':\n"
+        f"https://fischipedia.org/w/index.php?search={safe_name}&title=Special:Search&go=Go"
     )
 
 @bot.event
 async def on_message(message):
-    # Handle DM stop commands
     if isinstance(message.channel, discord.DMChannel):
         for giveaway in list(active_giveaways.values()):
             if message.author.id == giveaway.hoster.id and message.content.lower() in ["stop", "end", "cancel"]:
@@ -227,7 +207,6 @@ async def on_message(message):
                 await end_giveaway(giveaway)
         return
 
-    # Handle guesses in giveaway channels
     if message.author.bot or message.channel.id not in active_giveaways:
         return
 
@@ -238,12 +217,10 @@ async def on_message(message):
     except ValueError:
         return
 
-    # Range check
     if not (giveaway.low <= guess <= giveaway.high):
         await message.channel.send(f"{message.author.mention} ❌ Must be between {giveaway.low}-{giveaway.high}!", delete_after=3)
         return
 
-    # Check guess
     result = giveaway.check_guess(message.author, guess)
     if result is None:
         await message.channel.send(f"{message.author.mention} ❌ Hosts can't win!", delete_after=3)
@@ -251,7 +228,6 @@ async def on_message(message):
         await message.channel.send(f"🎉 {message.author.mention} guessed correctly!")
         giveaway.winners.add(message.author)
         
-        # Immediate winner DM
         try:
             await message.author.send(
                 f"🎊 You guessed the number in {giveaway.channel.mention}!\n"
