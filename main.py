@@ -46,6 +46,10 @@ class Giveaway:
 async def on_ready():
     print(f"Logged in as {bot.user}")
     try:
+        # Clear existing commands
+        tree.clear_commands(guild=None)
+        
+        # Sync new commands
         synced = await tree.sync()
         print(f"Synced {len(synced)} commands: {[cmd.name for cmd in synced]}")
     except Exception as e:
