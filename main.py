@@ -44,16 +44,15 @@ class Giveaway:
 
 @bot.event
 async def on_ready():
-    print(f"Logged in as {bot.user}")
+    print(f"Logged in as {bot.user} (ID: {bot.user.id})")
+    print("------")
+    # YOU FOUND AN EASTER EGG: EIEIEIEIIEIIEIEIIEIEIEIIEEIEIIEIEIIEI
+    # First sync with Discord
     try:
-        # Clear existing commands
-        tree.clear_commands(guild=None)
-        
-        # Sync new commands
         synced = await tree.sync()
         print(f"Synced {len(synced)} commands: {[cmd.name for cmd in synced]}")
     except Exception as e:
-        print("Sync error:", e)
+        print(f"Failed to sync commands: {e}")
 
 def has_admin_role(member):
     return any(role.name in ADMIN_ROLES for role in member.roles)
