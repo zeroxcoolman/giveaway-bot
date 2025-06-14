@@ -96,18 +96,30 @@ async def stocknow(interaction: discord.Interaction):
 async def on_ready():
     print(f"Logged in as {bot.user} (ID: {bot.user.id})")
     
-    # Sync commands globally (or per guild if you want)
-    synced_commands = await tree.sync()
-    print(f"Synced {len(synced_commands)} commands:")
-    for cmd in synced_commands:
-        print(f" - {cmd.name}: {cmd.description}")
-    
-    # Optional: fetch current registered commands from Discord API to double-check
-    registered_commands = await bot.tree.fetch_commands()
-    print(f"Discord currently has {len(registered_commands)} registered commands:")
-    for cmd in registered_commands:
-        print(f" * {cmd.name} - {cmd.description}")
+    try:
+        # Sync commands with more detailed error handling
+        print("Syncing commands...")
+        synced_commands = await tree.sync()
+        
+        print(f"Successfully synced {len(synced_commands)} commands:")
+        for cmd in synced_commands:
+            print(f" - {cmd.name}: {cmd.description}")
+        
+        # Verify with Discord's API
+        registered_commands = await bot.tree.fetch_commands()
+        print(f"Discord API reports {len(registered_commands)} commands:")
+        for cmd in registered_commands:
+            print(f" * {cmd.name} - {cmd.description}")
+            
+            # Debug: Check if stocknow exists in registered commands
+            if cmd.name == "stocknow":
+                print("   -> /stocknow found in Discord's API!")
+                
+    except Exception as e:
+        print(f"Error syncing commands: {type(e).__name__}: {e}")
+        print("Proceeding with potentially outdated commands...")
 
+    # Start your background task
     post_stock_loop.start()
     
 def has_admin_role(member):
