@@ -94,10 +94,22 @@ async def stocknow(interaction: discord.Interaction):
 # ----------------- BOT EVENTS -----------------
 @bot.event
 async def on_ready():
-    print(f"Logged in as {bot.user}")
-    await tree.sync()
-    post_stock_loop.start()
+    print(f"Logged in as {bot.user} (ID: {bot.user.id})")
+    
+    # Sync commands globally (or per guild if you want)
+    synced_commands = await tree.sync()
+    print(f"Synced {len(synced_commands)} commands:")
+    for cmd in synced_commands:
+        print(f" - {cmd.name}: {cmd.description}")
+    
+    # Optional: fetch current registered commands from Discord API to double-check
+    registered_commands = await bot.tree.fetch_commands()
+    print(f"Discord currently has {len(registered_commands)} registered commands:")
+    for cmd in registered_commands:
+        print(f" * {cmd.name} - {cmd.description}")
 
+    post_stock_loop.start()
+    
 def has_admin_role(member):
     return any(role.name in ADMIN_ROLES for role in member.roles)
 
