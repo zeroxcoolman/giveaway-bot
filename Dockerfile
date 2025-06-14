@@ -1,39 +1,45 @@
 FROM python:3.12-slim
 
-# Install dependencies for Playwright browsers
+# Install system dependencies for Playwright browsers
 RUN apt-get update && apt-get install -y \
-    libglib2.0-0 \
-    libxcomposite1 \
+    libx11-xcb1 \
+    libxcursor1 \
+    libgtk-3-0 \
+    libgdk-3-0 \
+    libpangocairo-1.0-0 \
+    libcairo-gobject2 \
+    libgdk-pixbuf2.0-0 \
+    wget \
+    curl \
+    ca-certificates \
+    fonts-liberation \
     libnss3 \
-    libxdamage1 \
-    libnspr4 \
-    libdbus-1-3 \
-    libxext6 \
+    libxss1 \
+    libasound2 \
     libatk1.0-0 \
-    libxfixes3 \
     libatk-bridge2.0-0 \
-    libxrandr2 \
     libcups2 \
     libgbm1 \
-    libxcb1 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxrandr2 \
     libpango-1.0-0 \
-    libxkbcommon0 \
-    libcairo2 \
-    libatspi2.0-0 \
-    libasound2 \
-    libx11-6 \
+    libxcb1 \
+    libnspr4 \
+    libdbus-1-3 \
+    libxfixes3 \
     && rm -rf /var/lib/apt/lists/*
 
-# Set working directory
-WORKDIR /app
-
-# Copy your code and requirements
-COPY requirements.txt .
-RUN pip install -r requirements.txt
-
-COPY . .
-
 # Install Playwright browsers
-RUN python -m playwright install
+RUN pip install --no-cache-dir playwright
+RUN playwright install
 
+# Copy your bot code
+WORKDIR /app
+COPY . /app
+
+# Install python dependencies
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Run your bot
 CMD ["python", "main.py"]
