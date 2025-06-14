@@ -1,4 +1,4 @@
-FROM python:3.12
+FROM mcr.microsoft.com/playwright/python:v1.42.0-jammy
 
 # Install system dependencies for Playwright browsers
 RUN apt-get update && apt-get install -y \
