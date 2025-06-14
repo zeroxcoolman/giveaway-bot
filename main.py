@@ -94,6 +94,7 @@ async def stocknow(interaction: discord.Interaction):
 # ----------------- BOT EVENTS -----------------
 @bot.event
 async def on_ready():
+    print("BROOO I HATE CODE")
     print(f"Logged in as {bot.user} (ID: {bot.user.id})")
     
     try:
