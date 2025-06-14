@@ -9,10 +9,9 @@ RUN apt-get update && apt-get install -y \
     libpangocairo-1.0-0 \
     libcairo-gobject2 \
     libgdk-pixbuf2.0-0 \
-    wget \
-    curl \
-    ca-certificates \
-    fonts-liberation \
+    libx11-6 \
+    libxkbcommon0 \
+    libatspi2.0-0 \
     libnss3 \
     libxss1 \
     libasound2 \
@@ -28,6 +27,10 @@ RUN apt-get update && apt-get install -y \
     libnspr4 \
     libdbus-1-3 \
     libxfixes3 \
+    wget \
+    curl \
+    ca-certificates \
+    fonts-liberation \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Playwright browsers
