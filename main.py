@@ -1,11 +1,12 @@
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 from discord import app_commands
-import asyncio
-import random
-import re
 import os
+import asyncio
+import re
+import random
 import urllib.parse
+from playwright.async_api import async_playwright
 
 intents = discord.Intents.default()
 intents.messages = True
@@ -16,11 +17,14 @@ intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 tree = bot.tree
 
+# CONFIG
 GIVEAWAY_CHANNEL_NAME = "🎁︱𝒩𝓊𝓂𝒷𝑒𝓇-𝒢𝒾𝓋𝑒𝒶𝓌𝒶𝓎"
 QUESTIONS_CHANNEL_NAME = "❓︱questions"
-ADMIN_ROLES = ["𝓞𝔀𝓷𝓮𝓻 👑", "𓂀 𝒞𝑜-𝒪𝓌𝓷𝓮𝓻 𓂀✅", "Administrator™🌟"]
+ADMIN_ROLES = ["𝓞𝔀𝓷𝓮𝓻 👑", "𓂀 𝒞𝑜-𝒪𝓌𝓃𝓮𝓇 𓂀✅", "Administrator™🌟"]
+STOCK_CHANNEL_ID = 1383468241560535082
+STOCK_URL = "https://vulcanvalues.com/grow-a-garden/stock"
 
-active_giveaways = {}  # {channel_id: Giveaway}
+active_giveaways = {}
 
 class Giveaway:
     def __init__(self, hoster, prize, winners, number_range, target, duration, channel):
@@ -38,23 +42,61 @@ class Giveaway:
 
     def check_guess(self, user, guess):
         if user.id == self.hoster.id:
-            return None  # Host can't win
+            return None
         self.guessed_users[user.id] = guess
         return guess == self.target
 
+# ----------------- STOCK SCRAPER -----------------
+async def fetch_stock():
+    try:
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True)
+            page = await browser.new_page()
+            await page.goto(STOCK_URL)
+            await page.wait_for_timeout(3000)  # wait for JS to load
+
+            sections = await page.locator(".text-white").all()
+            stock_text = []
+
+            for section in sections:
+                title = await section.inner_text()
+                if "STOCK" in title.upper():
+                    parent = await section.evaluate_handle("node => node.parentElement")
+                    items = await parent.query_selector_all("div:has-text('x')")
+                    for item in items:
+                        text = await item.inner_text()
+                        stock_text.append(text.strip())
+
+            await browser.close()
+            return stock_text
+    except Exception as e:
+        return [f"Error fetching stock: {e}"]
+
+@tasks.loop(minutes=5)
+async def post_stock_loop():
+    channel = bot.get_channel(STOCK_CHANNEL_ID)
+    if not channel:
+        print("Stock channel not found.")
+        return
+
+    stock_data = await fetch_stock()
+    if stock_data:
+        content = "**📦 Grow a Garden Stock Update**\n" + "\n".join(f"• {item}" for item in stock_data[:30])
+        await channel.send(content)
+
+@tree.command(name="stocknow", description="Get current Grow a Garden stock now")
+async def stocknow(interaction: discord.Interaction):
+    await interaction.response.defer()
+    stock_data = await fetch_stock()
+    content = "**📦 Current Stock:**\n" + "\n".join(f"• {item}" for item in stock_data[:30])
+    await interaction.followup.send(content)
+
+# ----------------- BOT EVENTS -----------------
 @bot.event
 async def on_ready():
-    print(f"Logged in as {bot.user} (ID: {bot.user.id})")
-    print("------")
-    
-    await asyncio.sleep(2)
-    
-    try:
-        synced = await tree.sync()
-        print(f"Synced {len(synced)} commands: {[cmd.name for cmd in synced]}")
-        print(f"Registered commands: {[cmd.name for cmd in tree.get_commands()]}")
-    except Exception as e:
-        print(f"Command sync error: {e}")
+    print(f"Logged in as {bot.user}")
+    await tree.sync()
+    post_stock_loop.start()
 
 def has_admin_role(member):
     return any(role.name in ADMIN_ROLES for role in member.roles)
