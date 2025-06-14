@@ -307,4 +307,9 @@ async def on_message(message):
         if len(giveaway.winners) >= giveaway.winners_required:
             await end_giveaway(giveaway)
 
-bot.run(os.getenv("BOT_TOKEN"))
+try:
+    print("Attempting to start bot...")
+    bot.run(os.getenv("BOT_TOKEN"))
+except Exception as e:
+    print(f"Failed to start bot: {type(e).__name__}: {e}")
+    raise
