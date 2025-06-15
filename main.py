@@ -1,12 +1,11 @@
 import discord
-from discord.ext import commands, tasks
+from discord.ext import commands
 from discord import app_commands
 import os
 import asyncio
 import re
 import random
 import urllib.parse
-from playwright.async_api import async_playwright
 
 intents = discord.Intents.default()
 intents.messages = True
@@ -21,8 +20,6 @@ tree = bot.tree
 GIVEAWAY_CHANNEL_NAME = "🎁︱𝒩𝓊𝓂𝒷𝑒𝓇-𝒢𝒾𝓋𝑒𝒶𝓌𝒶𝓎"
 QUESTIONS_CHANNEL_NAME = "❓︱questions"
 ADMIN_ROLES = ["𝓞𝔀𝓷𝓮𝓻 👑", "𓂀 𝒞𝑜-𝒪𝓌𝓃𝓮𝓇 𓂀✅", "Administrator™🌟"]
-STOCK_CHANNEL_ID = 1383468241560535082
-STOCK_URL = "https://vulcanvalues.com/grow-a-garden/stock"
 
 active_giveaways = {}
 
@@ -46,87 +43,26 @@ class Giveaway:
         self.guessed_users[user.id] = guess
         return guess == self.target
 
-# ----------------- STOCK SCRAPER -----------------
-async def fetch_stock():
-    try:
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True)
-            page = await browser.new_page()
-            await page.goto(STOCK_URL, timeout=60000)
-
-            # Wait for all stock list items to appear
-            await page.wait_for_selector("div.bg-gray-900.p-3.rounded-md.border.border-gray-700.text-white.font-medium.flex.items-center.space-x-3", timeout=60000)
-
-            item_elements = await page.locator("li.flex.items-center").all()
-            stock_items = []
-            for item in item_elements:
-                text = await item.inner_text()
-                stock_items.append(text.strip())
-
-            await browser.close()
-            return stock_items
-    except Exception as e:
-        return [f"Error fetching stock: {e}"]
-
-
-@tasks.loop(minutes=5)
-async def post_stock_loop():
-    channel = bot.get_channel(STOCK_CHANNEL_ID)
-    if not channel:
-        print("Stock channel not found.")
-        return
-
-    stock_data = await fetch_stock()
-    if stock_data:
-        content = "**📦 Grow a Garden Stock Update**\n" + "\n".join(f"• {item}" for item in stock_data[:30])
-        await channel.send(content)
-
-@tree.command(name="stocknow", description="Get current Grow a Garden stock now")
-async def stocknow(interaction: discord.Interaction):
-    await interaction.response.defer()
-    stock_data = await fetch_stock()
-    content = "**📦 Current Stock:**\n" + "\n".join(f"• {item}" for item in stock_data[:30])
-    await interaction.followup.send(content)
-
 # ----------------- BOT EVENTS -----------------
 @bot.event
 async def on_ready():
-    print("BROOO I HATE CODE")
     print(f"Logged in as {bot.user} (ID: {bot.user.id})")
-    
     try:
-        # Sync commands with more detailed error handling
         print("Syncing commands...")
         synced_commands = await tree.sync()
-        
         print(f"Successfully synced {len(synced_commands)} commands:")
         for cmd in synced_commands:
             print(f" - {cmd.name}: {cmd.description}")
-        
-        # Verify with Discord's API
-        registered_commands = await bot.tree.fetch_commands()
-        print(f"Discord API reports {len(registered_commands)} commands:")
-        for cmd in registered_commands:
-            print(f" * {cmd.name} - {cmd.description}")
-            
-            # Debug: Check if stocknow exists in registered commands
-            if cmd.name == "stocknow":
-                print("   -> /stocknow found in Discord's API!")
-                
     except Exception as e:
         print(f"Error syncing commands: {type(e).__name__}: {e}")
-        print("Proceeding with potentially outdated commands...")
 
-    # Start your background task
-    post_stock_loop.start()
-    
 def has_admin_role(member):
     return any(role.name in ADMIN_ROLES for role in member.roles)
 
 async def end_giveaway(giveaway):
     if giveaway.task:
         giveaway.task.cancel()
-    
+
     for winner in giveaway.winners:
         try:
             await winner.send(
@@ -136,7 +72,7 @@ async def end_giveaway(giveaway):
             )
         except:
             pass
-    
+
     winners_text = ", ".join(w.mention for w in giveaway.winners) if giveaway.winners else "No winners"
     embed = discord.Embed(
         title="🎉 Giveaway Ended",
@@ -144,7 +80,6 @@ async def end_giveaway(giveaway):
         color=discord.Color.green()
     )
     await giveaway.channel.send(embed=embed)
-    
     await giveaway.channel.set_permissions(
         giveaway.channel.guild.default_role,
         send_messages=False
@@ -162,9 +97,9 @@ async def end_giveaway(giveaway):
     target="Target number (random if empty)"
 )
 async def start_giveaway(interaction: discord.Interaction, winners: int, prize: str, range_: str,
-                        hoster: discord.Member, duration: int = 0, target: int = None):
+                         hoster: discord.Member, duration: int = 0, target: int = None):
     await interaction.response.defer()
-    
+
     if interaction.channel.name != GIVEAWAY_CHANNEL_NAME and not has_admin_role(interaction.user):
         return await interaction.followup.send("❌ Use the giveaway channel!", ephemeral=True)
 
@@ -217,11 +152,11 @@ async def schedule_giveaway_end(giveaway):
 @tree.command(name="stop_giveaway", description="End the current giveaway")
 async def stop_giveaway(interaction: discord.Interaction):
     await interaction.response.defer()
-    
+
     giveaway = active_giveaways.get(interaction.channel.id)
     if not giveaway:
         return await interaction.followup.send("❌ No active giveaway here", ephemeral=True)
-    
+
     if interaction.user.id != giveaway.hoster.id and not has_admin_role(interaction.user):
         return await interaction.followup.send("❌ Only the host can stop this", ephemeral=True)
 
@@ -231,13 +166,13 @@ async def stop_giveaway(interaction: discord.Interaction):
 @tree.command(name="guiderods", description="Get the Fishing Progression Guide")
 async def guiderods(interaction: discord.Interaction):
     await interaction.response.defer()
-    
+
     if interaction.channel.name != QUESTIONS_CHANNEL_NAME:
         return await interaction.followup.send(
             f"❌ This command can only be used in #{QUESTIONS_CHANNEL_NAME}!",
             ephemeral=True
         )
-    
+
     embed = discord.Embed(
         title="🎣 Fishing Rod Progression Guide",
         color=discord.Color.blue()
@@ -249,13 +184,13 @@ async def guiderods(interaction: discord.Interaction):
 @app_commands.describe(rod_name="Name of the rod to search for")
 async def searchrod(interaction: discord.Interaction, rod_name: str):
     await interaction.response.defer()
-    
+
     if interaction.channel.name != QUESTIONS_CHANNEL_NAME:
         return await interaction.followup.send(
             f"❌ This command can only be used in #{QUESTIONS_CHANNEL_NAME}!",
             ephemeral=True
         )
-    
+
     safe_name = urllib.parse.quote(rod_name)
     await interaction.followup.send(
         f"🔍 Search results for '{rod_name}':\n"
@@ -291,7 +226,7 @@ async def on_message(message):
     elif result:
         await message.channel.send(f"🎉 {message.author.mention} guessed correctly!")
         giveaway.winners.add(message.author)
-        
+
         try:
             await message.author.send(
                 f"🎊 You guessed the number in {giveaway.channel.mention}!\n"
@@ -300,7 +235,7 @@ async def on_message(message):
             )
         except:
             await message.channel.send(f"{message.author.mention} Couldn't DM you - enable DMs to receive your prize info!", delete_after=10)
-        
+
         if len(giveaway.winners) >= giveaway.winners_required:
             await end_giveaway(giveaway)
 
