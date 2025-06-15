@@ -52,25 +52,22 @@ async def fetch_stock():
         async with async_playwright() as p:
             browser = await p.chromium.launch(headless=True)
             page = await browser.new_page()
-            await page.goto(STOCK_URL)
-            await page.wait_for_timeout(3000)  # wait for JS to load
+            await page.goto(STOCK_URL, timeout=60000)
 
-            sections = await page.locator(".text-white").all()
-            stock_text = []
+            # Wait for all stock list items to appear
+            await page.wait_for_selector("li.flex.items-center")
 
-            for section in sections:
-                title = await section.inner_text()
-                if "STOCK" in title.upper():
-                    parent = await section.evaluate_handle("node => node.parentElement")
-                    items = await parent.query_selector_all("div:has-text('x')")
-                    for item in items:
-                        text = await item.inner_text()
-                        stock_text.append(text.strip())
+            item_elements = await page.locator("li.flex.items-center").all()
+            stock_items = []
+            for item in item_elements:
+                text = await item.inner_text()
+                stock_items.append(text.strip())
 
             await browser.close()
-            return stock_text
+            return stock_items
     except Exception as e:
         return [f"Error fetching stock: {e}"]
+
 
 @tasks.loop(minutes=5)
 async def post_stock_loop():
