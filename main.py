@@ -55,7 +55,7 @@ async def fetch_stock():
             await page.goto(STOCK_URL, timeout=60000)
 
             # Wait for all stock list items to appear
-            await page.wait_for_selector("li.flex.items-center")
+            await page.wait_for_selector("div.bg-gray-900.p-3.rounded-md.border.border-gray-700.text-white.font-medium.flex.items-center.space-x-3", timeout=60000)
 
             item_elements = await page.locator("li.flex.items-center").all()
             stock_items = []
