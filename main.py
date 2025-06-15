@@ -1,5 +1,3 @@
-print("🔥 SCRIPT IS RUNNING")
-raise Exception("INTENTIONALLY FAILING TO CONFIRM ENTRY POINT")
 import discord
 from discord.ext import commands, tasks
 from discord import app_commands
