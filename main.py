@@ -5,7 +5,6 @@ import os
 import asyncio
 import re
 import random
-import urllib.parse
 
 intents = discord.Intents.default()
 intents.messages = True
@@ -18,7 +17,6 @@ tree = bot.tree
 
 # CONFIG
 GIVEAWAY_CHANNEL_NAME = "🎁︱𝒩𝓊𝓂𝒷𝑒𝓇-𝒢𝒾𝓋𝑒𝒶𝓌𝒶𝓎"
-QUESTIONS_CHANNEL_NAME = "❓︱questions"
 ADMIN_ROLES = ["𝓞𝔀𝓷𝓮𝓻 👑", "𓂀 𝒞𝑜-𝒪𝓌𝓃𝓮𝓇 𓂀✅", "Administrator™🌟"]
 
 active_giveaways = {}
@@ -162,40 +160,6 @@ async def stop_giveaway(interaction: discord.Interaction):
 
     await interaction.followup.send("🛑 Ending giveaway...")
     await end_giveaway(giveaway)
-
-@tree.command(name="guiderods", description="Get the Fishing Progression Guide")
-async def guiderods(interaction: discord.Interaction):
-    await interaction.response.defer()
-
-    if interaction.channel.name != QUESTIONS_CHANNEL_NAME:
-        return await interaction.followup.send(
-            f"❌ This command can only be used in #{QUESTIONS_CHANNEL_NAME}!",
-            ephemeral=True
-        )
-
-    embed = discord.Embed(
-        title="🎣 Fishing Rod Progression Guide",
-        color=discord.Color.blue()
-    )
-    embed.set_image(url="https://fischipedia.org/wiki/Special:FilePath/Progress_Tiers.png")
-    await interaction.followup.send(embed=embed)
-
-@tree.command(name="searchrod", description="Search for a rod on Fischipedia")
-@app_commands.describe(rod_name="Name of the rod to search for")
-async def searchrod(interaction: discord.Interaction, rod_name: str):
-    await interaction.response.defer()
-
-    if interaction.channel.name != QUESTIONS_CHANNEL_NAME:
-        return await interaction.followup.send(
-            f"❌ This command can only be used in #{QUESTIONS_CHANNEL_NAME}!",
-            ephemeral=True
-        )
-
-    safe_name = urllib.parse.quote(rod_name)
-    await interaction.followup.send(
-        f"🔍 Search results for '{rod_name}':\n"
-        f"https://fischipedia.org/w/index.php?search={safe_name}&title=Special:Search&go=Go"
-    )
 
 @bot.event
 async def on_message(message):
