@@ -401,6 +401,22 @@ async def sell_seed(interaction: discord.Interaction, seed: str, seed_type: app_
     seed = seed.capitalize()
     inv = user_inventory[interaction.user.id]
     
+    # Check if user has the seed in specified type
+    if seed_type.value == "growing":
+        seed_list = [s for s in inv["growing"] if s.name.lower() == seed.lower()]
+        if not seed_list:
+            return await interaction.response.send_message(
+                "❌ You don't have this seed growing. Check your inventory with `/inventory`.",
+                ephemeral=True
+            )
+    else:
+        seed_list = [s for s in inv["grown"] if s.name.lower() == seed.lower()]
+        if not seed_list:
+            return await interaction.response.send_message(
+                "❌ You don't have this seed grown. Check your inventory with `/inventory`.",
+                ephemeral=True
+            )
+    
     # Find seed in shop to get base price
     base_price = None
     if seed in seeds:
@@ -409,26 +425,19 @@ async def sell_seed(interaction: discord.Interaction, seed: str, seed_type: app_
         base_price = limited_seeds[seed]["sheckles"]
     
     if not base_price or base_price <= 0:
-        return await interaction.response.send_message("❌ This seed cannot be sold.", ephemeral=True)
+        return await interaction.response.send_message(
+            "❌ This seed cannot be sold (it has no sale value).",
+            ephemeral=True
+        )
     
     # Calculate sell price based on type
     if seed_type.value == "growing":
-        # Check if user has this seed growing
-        growing_seeds = [s for s in inv["growing"] if s.name.lower() == seed.lower()]
-        if not growing_seeds:
-            return await interaction.response.send_message("❌ You don't have this seed growing.", ephemeral=True)
-        
         # Remove first found growing seed
-        inv["growing"].remove(growing_seeds[0])
+        inv["growing"].remove(seed_list[0])
         sell_price = base_price // 2  # Half price for growing seeds
     else:
-        # Check if user has this seed grown
-        grown_seeds = [s for s in inv["grown"] if s.name.lower() == seed.lower()]
-        if not grown_seeds:
-            return await interaction.response.send_message("❌ You don't have this seed grown.", ephemeral=True)
-        
         # Remove first found grown seed
-        inv["grown"].remove(grown_seeds[0])
+        inv["grown"].remove(seed_list[0])
         sell_price = base_price  # Full price for grown seeds
     
     # Add sheckles to user
