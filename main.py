@@ -388,6 +388,73 @@ async def shoplist(interaction: discord.Interaction):
     
     await interaction.response.send_message(embed=embed)
 
+@tree.command(name="sell_seed")
+@app_commands.describe(seed="Seed name to sell", seed_type="Type of seed to sell")
+@app_commands.choices(seed_type=[
+    app_commands.Choice(name="Growing", value="growing"),
+    app_commands.Choice(name="Grown", value="grown")
+])
+async def sell_seed(interaction: discord.Interaction, seed: str, seed_type: app_commands.Choice[str]):
+    # First update the inventory to move finished seeds
+    update_growing_seeds(interaction.user.id)
+    
+    seed = seed.capitalize()
+    inv = user_inventory[interaction.user.id]
+    
+    # Find seed in shop to get base price
+    base_price = None
+    if seed in seeds:
+        base_price = seeds[seed][0]  # Get the purchase price
+    elif seed in limited_seeds:
+        base_price = limited_seeds[seed]["sheckles"]
+    
+    if not base_price or base_price <= 0:
+        return await interaction.response.send_message("❌ This seed cannot be sold.", ephemeral=True)
+    
+    # Calculate sell price based on type
+    if seed_type.value == "growing":
+        # Check if user has this seed growing
+        growing_seeds = [s for s in inv["growing"] if s.name.lower() == seed.lower()]
+        if not growing_seeds:
+            return await interaction.response.send_message("❌ You don't have this seed growing.", ephemeral=True)
+        
+        # Remove first found growing seed
+        inv["growing"].remove(growing_seeds[0])
+        sell_price = base_price // 2  # Half price for growing seeds
+    else:
+        # Check if user has this seed grown
+        grown_seeds = [s for s in inv["grown"] if s.name.lower() == seed.lower()]
+        if not grown_seeds:
+            return await interaction.response.send_message("❌ You don't have this seed grown.", ephemeral=True)
+        
+        # Remove first found grown seed
+        inv["grown"].remove(grown_seeds[0])
+        sell_price = base_price  # Full price for grown seeds
+    
+    # Add sheckles to user
+    user_sheckles[interaction.user.id] += sell_price
+    
+    await interaction.response.send_message(
+        f"✅ Sold {seed} seed ({seed_type.name.lower()}) for {sell_price} sheckles!",
+        ephemeral=True
+    )
+
+def update_growing_seeds(user_id):
+    """Move finished growing seeds to grown inventory"""
+    current_time = time.time()
+    growing = user_inventory[user_id]["growing"]
+    grown = user_inventory[user_id]["grown"]
+    
+    # Find all seeds that are done growing
+    finished_seeds = [seed for seed in growing if seed.finish_time <= current_time]
+    
+    # Move them to grown
+    for seed in finished_seeds:
+        grown.append(seed)
+    
+    # Remove them from growing
+    user_inventory[user_id]["growing"] = [seed for seed in growing if seed.finish_time > current_time]
+
 @bot.event
 async def on_message(message):
     if message.author.bot:
