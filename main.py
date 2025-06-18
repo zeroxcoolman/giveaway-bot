@@ -36,6 +36,55 @@ seeds = {
     "Beanstalk": (70, 750),
 }
 
+mutations = {
+    "global": {
+        "Giant": {
+            "multiplier": 1.5,
+            "rarity": 0.05,
+            "description": "Yields 50% more sheckles"
+        },
+        "Golden": {
+            "multiplier": 2.0,
+            "rarity": 0.01,
+            "description": "Doubles the sheckle value"
+        },
+        "Diseased": {
+            "multiplier": 0.5,
+            "rarity": 0.1,
+            "description": "Reduces value by half"
+        }
+    },
+    "specific": {
+        "Carrot": {
+            "Perfect": {
+                "multiplier": 10.0,
+                "rarity": 0.001,
+                "description": "The ultimate carrot - worth 10x normal value",
+                "priority": True
+            },
+            "Bunny's Favorite": {
+                "multiplier": 3.0,
+                "rarity": 0.02,
+                "description": "Specially loved by rabbits"
+            }
+        },
+        "Ember Lily": {
+            "Inferno": {
+                "multiplier": 3.5,
+                "rarity": 0.03,
+                "description": "Burns with eternal flame"
+            }
+        },
+        "Beanstalk": {
+            "Skyreach": {
+                "multiplier": 4.0,
+                "rarity": 0.015,
+                "description": "Grows high enough to reach the clouds"
+            }
+        }
+    }
+}
+
 limited_seeds = {}
 
 trade_offers = {}  # user_id -> dict with keys: sender_id, seed_name, timestamp
@@ -64,6 +113,29 @@ class GrowingSeed:
     def __init__(self, name, finish_time):
         self.name = name
         self.finish_time = finish_time
+        self.mutation = self.determine_mutation(name)
+    
+def determine_mutation(self, plant_name):
+    """Determine if this seed gets a special mutation"""
+    # 1. First check for Ultra-Rare Perfect Carrot or priority (0.1% chance)
+    if plant_name in mutations["specific"]:
+        for mut, data in mutations["specific"][plant_name].items():
+            if data.get("priority", False) and random.random() < data["rarity"]:
+                return mut
+    
+    # 2. Then check other specific mutations (excluding Perfect)
+    if plant_name in mutations["specific"]:
+        for mut, data in mutations["specific"][plant_name].items():
+            if mut != "Perfect" and random.random() < data["rarity"]:
+                return mut
+    
+    # 3. Finally check global mutations
+    for mut, data in mutations["global"].items():
+        if random.random() < data["rarity"]:
+            return mut
+    
+    return None  # No mutation
+
 
 def has_admin_role(member):
     return any(role.name in ADMIN_ROLES for role in member.roles)
@@ -186,18 +258,36 @@ async def stop_giveaway(interaction: discord.Interaction):
 
 @tree.command(name="inventory")
 async def inventory(interaction: discord.Interaction):
-    # First update the inventory to move finished seeds
     update_growing_seeds(interaction.user.id)
     
     inv = user_inventory[interaction.user.id]
-    grown = ', '.join(p.name for p in inv["grown"]) or 'None'
-    growing = ', '.join(f"{p.name} ({int(p.finish_time - time.time())}s left)" for p in inv["growing"]) or 'None'
+    
+    # Format grown seeds with mutations
+    grown_list = []
+    for seed in inv["grown"]:
+        if seed.mutation:
+            grown_list.append(f"{seed.name} ✨({seed.mutation})")
+        else:
+            grown_list.append(seed.name)
+    grown = ', '.join(grown_list) or 'None'
+    
+    # Format growing seeds with mutations and time remaining
+    growing_list = []
+    for seed in inv["growing"]:
+        time_left = int(seed.finish_time - time.time())
+        if seed.mutation:
+            growing_list.append(f"{seed.name} ✨({seed.mutation}) [{time_left}s]")
+        else:
+            growing_list.append(f"{seed.name} [{time_left}s]")
+    growing = ', '.join(growing_list) or 'None'
+    
     sheckles = user_sheckles.get(interaction.user.id, 0)
     
     embed = discord.Embed(title="🌱 Your Garden & Wallet", color=discord.Color.green())
     embed.add_field(name="🌾 Growing", value=growing, inline=False)
     embed.add_field(name="🥕 Grown", value=grown, inline=False)
     embed.add_field(name="💰 Sheckles", value=str(sheckles), inline=False)
+    
     await interaction.response.send_message(embed=embed)
 
 @tree.command(name="sheckles")
@@ -389,21 +479,19 @@ async def shoplist(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed)
 
 @tree.command(name="sell_seed")
-@app_commands.describe(seed="Seed name to sell", seed_type="Type of seed to sell")
+@app_commands.describe(seed="Seed name", seed_type="Seed state")
 @app_commands.choices(seed_type=[
     app_commands.Choice(name="Growing", value="growing"),
     app_commands.Choice(name="Grown", value="grown")
 ])
 async def sell_seed(interaction: discord.Interaction, seed: str, seed_type: app_commands.Choice[str]):
-    # First update the inventory to move finished seeds
     update_growing_seeds(interaction.user.id)
     
-    # Normalize the seed name (case-insensitive match)
-    seed_lower = seed.lower()
+    seed = seed.capitalize()
     inv = user_inventory[interaction.user.id]
     
-    # Define base prices for all seeds (with proper capitalization)
-    seed_base_prices = {
+    # Base prices (even for free seeds like Carrot)
+    base_prices = {
         "Carrot": 5,
         "Strawberry": 10,
         "Potato": 5,
@@ -413,54 +501,44 @@ async def sell_seed(interaction: discord.Interaction, seed: str, seed_type: app_
         "Beanstalk": 70
     }
     
-    # Find the properly capitalized seed name
-    proper_seed_name = None
-    for seed_name in seed_base_prices:
-        if seed_name.lower() == seed_lower:
-            proper_seed_name = seed_name
-            break
-    
-    if not proper_seed_name:
-        return await interaction.response.send_message(
-            f"❌ '{seed}' is not a valid seed type that can be sold.",
-            ephemeral=True
-        )
-    
-    # Check if user has the seed in specified type
+    # Find seed in inventory
+    seed_list = []
     if seed_type.value == "growing":
-        seed_list = [s for s in inv["growing"] if s.name.lower() == seed_lower]
-        if not seed_list:
-            return await interaction.response.send_message(
-                f"❌ You don't have {proper_seed_name} growing. Check your inventory with `/inventory`.",
-                ephemeral=True
-            )
+        seed_list = [s for s in inv["growing"] if s.name == seed]
     else:
-        seed_list = [s for s in inv["grown"] if s.name.lower() == seed_lower]
-        if not seed_list:
-            return await interaction.response.send_message(
-                f"❌ You don't have {proper_seed_name} grown. Check your inventory with `/inventory`.",
-                ephemeral=True
-            )
+        seed_list = [s for s in inv["grown"] if s.name == seed]
     
-    base_price = seed_base_prices[proper_seed_name]
+    if not seed_list or seed not in base_prices:
+        return await interaction.response.send_message("❌ Invalid seed or type", ephemeral=True)
     
-    # Calculate sell price based on type
+    # Calculate price with mutation
+    base = base_prices[seed]
+    mult = 1.0
+    if seed_list[0].mutation:
+        mut = seed_list[0].mutation
+        if seed in mutations["specific"] and mut in mutations["specific"][seed]:
+            mult = mutations["specific"][seed][mut]["multiplier"]
+        elif mut in mutations["global"]:
+            mult = mutations["global"][mut]["multiplier"]
+    
+    price = int(base * mult)
     if seed_type.value == "growing":
-        # Remove first found growing seed
+        price = price // 2  # Half price for growing
+    
+    # Complete sale
+    if seed_type.value == "growing":
         inv["growing"].remove(seed_list[0])
-        sell_price = base_price // 2  # Half price for growing seeds
     else:
-        # Remove first found grown seed
         inv["grown"].remove(seed_list[0])
-        sell_price = base_price  # Full price for grown seeds
     
-    # Add sheckles to user
-    user_sheckles[interaction.user.id] += sell_price
+    user_sheckles[interaction.user.id] += price
     
-    await interaction.response.send_message(
-        f"✅ Sold {proper_seed_name} seed ({seed_type.name.lower()}) for {sell_price} sheckles!",
-        ephemeral=True
-    )
+    msg = f"✅ Sold {seed}"
+    if seed_list[0].mutation:
+        msg += f" ({seed_list[0].mutation})"
+    msg += f" for {price} sheckles!"
+    
+    await interaction.response.send_message(msg, ephemeral=True)
 
 
 def update_growing_seeds(user_id):
