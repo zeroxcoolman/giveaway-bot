@@ -398,26 +398,11 @@ async def sell_seed(interaction: discord.Interaction, seed: str, seed_type: app_
     # First update the inventory to move finished seeds
     update_growing_seeds(interaction.user.id)
     
-    seed = seed.capitalize()
+    # Normalize the seed name (case-insensitive match)
+    seed_lower = seed.lower()
     inv = user_inventory[interaction.user.id]
     
-    # Check if user has the seed in specified type
-    if seed_type.value == "growing":
-        seed_list = [s for s in inv["growing"] if s.name.lower() == seed.lower()]
-        if not seed_list:
-            return await interaction.response.send_message(
-                "❌ You don't have this seed growing. Check your inventory with `/inventory`.",
-                ephemeral=True
-            )
-    else:
-        seed_list = [s for s in inv["grown"] if s.name.lower() == seed.lower()]
-        if not seed_list:
-            return await interaction.response.send_message(
-                "❌ You don't have this seed grown. Check your inventory with `/inventory`.",
-                ephemeral=True
-            )
-    
-    # Define base prices for all seeds
+    # Define base prices for all seeds (with proper capitalization)
     seed_base_prices = {
         "Carrot": 5,
         "Strawberry": 10,
@@ -428,14 +413,36 @@ async def sell_seed(interaction: discord.Interaction, seed: str, seed_type: app_
         "Beanstalk": 70
     }
     
-    # Check if seed exists in our price list
-    if seed not in seed_base_prices:
+    # Find the properly capitalized seed name
+    proper_seed_name = None
+    for seed_name in seed_base_prices:
+        if seed_name.lower() == seed_lower:
+            proper_seed_name = seed_name
+            break
+    
+    if not proper_seed_name:
         return await interaction.response.send_message(
-            f"❌ {seed} is not a valid seed type that can be sold.",
+            f"❌ '{seed}' is not a valid seed type that can be sold.",
             ephemeral=True
         )
     
-    base_price = seed_base_prices[seed]
+    # Check if user has the seed in specified type
+    if seed_type.value == "growing":
+        seed_list = [s for s in inv["growing"] if s.name.lower() == seed_lower]
+        if not seed_list:
+            return await interaction.response.send_message(
+                f"❌ You don't have {proper_seed_name} growing. Check your inventory with `/inventory`.",
+                ephemeral=True
+            )
+    else:
+        seed_list = [s for s in inv["grown"] if s.name.lower() == seed_lower]
+        if not seed_list:
+            return await interaction.response.send_message(
+                f"❌ You don't have {proper_seed_name} grown. Check your inventory with `/inventory`.",
+                ephemeral=True
+            )
+    
+    base_price = seed_base_prices[proper_seed_name]
     
     # Calculate sell price based on type
     if seed_type.value == "growing":
@@ -451,9 +458,10 @@ async def sell_seed(interaction: discord.Interaction, seed: str, seed_type: app_
     user_sheckles[interaction.user.id] += sell_price
     
     await interaction.response.send_message(
-        f"✅ Sold {seed} seed ({seed_type.name.lower()}) for {sell_price} sheckles!",
+        f"✅ Sold {proper_seed_name} seed ({seed_type.name.lower()}) for {sell_price} sheckles!",
         ephemeral=True
     )
+
 
 def update_growing_seeds(user_id):
     """Move finished growing seeds to grown inventory"""
