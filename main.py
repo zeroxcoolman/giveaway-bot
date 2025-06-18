@@ -115,26 +115,26 @@ class GrowingSeed:
         self.finish_time = finish_time
         self.mutation = self.determine_mutation(name)
     
-def determine_mutation(self, plant_name):
-    """Determine if this seed gets a special mutation"""
-    # 1. First check for Ultra-Rare Perfect Carrot or priority (0.1% chance)
-    if plant_name in mutations["specific"]:
-        for mut, data in mutations["specific"][plant_name].items():
-            if data.get("priority", False) and random.random() < data["rarity"]:
+    def determine_mutation(self, plant_name):
+        """Determine if this seed gets a special mutation"""
+        # 1. First check for Ultra-Rare Perfect Carrot or priority (0.1% chance)
+        if plant_name in mutations["specific"]:
+            for mut, data in mutations["specific"][plant_name].items():
+                if data.get("priority", False) and random.random() < data["rarity"]:
+                    return mut
+        
+        # 2. Then check other specific mutations (excluding Perfect)
+        if plant_name in mutations["specific"]:
+            for mut, data in mutations["specific"][plant_name].items():
+                if mut != "Perfect" and random.random() < data["rarity"]:
+                    return mut
+        
+        # 3. Finally check global mutations
+        for mut, data in mutations["global"].items():
+            if random.random() < data["rarity"]:
                 return mut
-    
-    # 2. Then check other specific mutations (excluding Perfect)
-    if plant_name in mutations["specific"]:
-        for mut, data in mutations["specific"][plant_name].items():
-            if mut != "Perfect" and random.random() < data["rarity"]:
-                return mut
-    
-    # 3. Finally check global mutations
-    for mut, data in mutations["global"].items():
-        if random.random() < data["rarity"]:
-            return mut
-    
-    return None  # No mutation
+        
+        return None  # No mutation
 
 
 def has_admin_role(member):
