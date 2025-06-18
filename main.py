@@ -19,7 +19,8 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 tree = bot.tree
 
 GIVEAWAY_CHANNEL_NAME = "🎁︱𝒩𝓊𝓂𝒷𝑒𝓇-𝒢𝒾𝓋𝑒𝒶𝓌𝒶𝓎"
-ADMIN_ROLES = ["𝓞𝔀𝓃𝓮𝓇 👑", "𓂀 𝒞𝑜-𝒪𝓌𝓃𝑒𝓇 𓂀✅", "Administrator™🌟"]
+ADMIN_ROLES = ["𝓞𝔀𝓷𝓮𝓻 👑", "𓂀 𝒞𝑜-𝒪𝓌𝓃𝑒𝓇 𓂀✅", "Administrator™🌟"]
+MESSAGES_PER_SHECKLE = 10  # Number of messages needed to earn 1 sheckle
 
 active_giveaways = {}
 user_message_counts = defaultdict(int)
@@ -173,6 +174,11 @@ async def inventory(interaction: discord.Interaction):
     embed.add_field(name="💰 Sheckles", value=str(sheckles), inline=False)
     await interaction.response.send_message(embed=embed)
 
+@tree.command(name="sheckles")
+async def check_sheckles(interaction: discord.Interaction):
+    sheckles = user_sheckles.get(interaction.user.id, 0)
+    await interaction.response.send_message(f"💰 You have {sheckles} sheckles.")
+
 @tree.command(name="closest_quest")
 async def closest_quest(interaction: discord.Interaction):
     count = user_message_counts[interaction.user.id]
@@ -193,6 +199,14 @@ async def give_seed(interaction: discord.Interaction, user: discord.Member, seed
     grow_time = time.time() + random.randint(300, 600)
     user_inventory[user.id]["growing"].append(GrowingSeed(seed, grow_time))
     await interaction.response.send_message(f"✅ Gave {seed} to {user.mention}")
+
+@tree.command(name="give_sheckles")
+@app_commands.describe(user="User to give sheckles to", amount="Amount of sheckles")
+async def give_sheckles(interaction: discord.Interaction, user: discord.Member, amount: int):
+    if not has_admin_role(interaction.user):
+        return await interaction.response.send_message("❌ Not allowed", ephemeral=True)
+    user_sheckles[user.id] += amount
+    await interaction.response.send_message(f"✅ Gave {amount} sheckles to {user.mention}")
 
 @tree.command(name="trade_offer")
 @app_commands.describe(user="User to offer trade to", seed="Seed name to trade")
@@ -223,7 +237,7 @@ async def trade_offer(interaction: discord.Interaction, user: discord.Member, se
                 pass
             return
 
-    await interaction.response.send_message("❌ You don’t have that grown seed to offer.", ephemeral=True)
+    await interaction.response.send_message("❌ You don't have that grown seed to offer.", ephemeral=True)
 
 @tree.command(name="trade_accept")
 async def trade_accept(interaction: discord.Interaction):
@@ -287,7 +301,13 @@ async def shoplist(interaction: discord.Interaction):
 async def on_message(message):
     if message.author.bot:
         return
+    
+    # Increment message count
     user_message_counts[message.author.id] += 1
+    
+    # Award sheckles for every MESSAGES_PER_SHECKLE messages
+    if user_message_counts[message.author.id] % MESSAGES_PER_SHECKLE == 0:
+        user_sheckles[message.author.id] += 1
 
     # Handle giveaway guessing
     giveaway = active_giveaways.get(message.channel.id)
