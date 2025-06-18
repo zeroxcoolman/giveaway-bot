@@ -62,6 +62,22 @@ class GrowingSeed:
 def has_admin_role(member):
     return any(role.name in ADMIN_ROLES for role in member.roles)
 
+def update_growing_seeds(user_id):
+    """Move finished growing seeds to grown inventory"""
+    current_time = time.time()
+    growing = user_inventory[user_id]["growing"]
+    grown = user_inventory[user_id]["grown"]
+    
+    # Find all seeds that are done growing
+    finished_seeds = [seed for seed in growing if seed.finish_time <= current_time]
+    
+    # Move them to grown
+    for seed in finished_seeds:
+        grown.append(seed)
+    
+    # Remove them from growing
+    user_inventory[user_id]["growing"] = [seed for seed in growing if seed.finish_time > current_time]
+
 @bot.event
 async def on_ready():
     print(f"Logged in as {bot.user} (ID: {bot.user.id})")
@@ -164,10 +180,14 @@ async def stop_giveaway(interaction: discord.Interaction):
 
 @tree.command(name="inventory")
 async def inventory(interaction: discord.Interaction):
+    # First update the inventory to move finished seeds
+    update_growing_seeds(interaction.user.id)
+    
     inv = user_inventory[interaction.user.id]
     grown = ', '.join(p.name for p in inv["grown"]) or 'None'
-    growing = ', '.join(f"{p.name} ({int(p.finish_time - time.time())}s left)" for p in inv["growing"] if p.finish_time > time.time()) or 'None'
+    growing = ', '.join(f"{p.name} ({int(p.finish_time - time.time())}s left)" for p in inv["growing"]) or 'None'
     sheckles = user_sheckles.get(interaction.user.id, 0)
+    
     embed = discord.Embed(title="🌱 Your Garden & Wallet", color=discord.Color.green())
     embed.add_field(name="🌾 Growing", value=growing, inline=False)
     embed.add_field(name="🥕 Grown", value=grown, inline=False)
@@ -208,9 +228,55 @@ async def give_sheckles(interaction: discord.Interaction, user: discord.Member, 
     user_sheckles[user.id] += amount
     await interaction.response.send_message(f"✅ Gave {amount} sheckles to {user.mention}")
 
+@tree.command(name="buy_seed")
+@app_commands.describe(seed="Seed name to purchase")
+async def buy_seed(interaction: discord.Interaction, seed: str):
+    seed = seed.capitalize()
+    
+    # Check if seed exists in regular shop
+    if seed in seeds:
+        cost, _ = seeds[seed]
+        if cost <= 0:
+            return await interaction.response.send_message("❌ This seed is not for sale.", ephemeral=True)
+            
+        if user_sheckles.get(interaction.user.id, 0) < cost:
+            return await interaction.response.send_message("❌ Not enough sheckles!", ephemeral=True)
+            
+        # Deduct sheckles and add seed
+        user_sheckles[interaction.user.id] -= cost
+        grow_time = time.time() + random.randint(300, 600)
+        user_inventory[interaction.user.id]["growing"].append(GrowingSeed(seed, grow_time))
+        return await interaction.response.send_message(f"✅ Purchased {seed} seed for {cost} sheckles! It will be ready in {int(grow_time - time.time())} seconds.")
+    
+    # Check if seed exists in limited shop
+    elif seed in limited_seeds:
+        seed_data = limited_seeds[seed]
+        if time.time() > seed_data["expires"]:
+            return await interaction.response.send_message("❌ This limited seed is no longer available.", ephemeral=True)
+            
+        if user_sheckles.get(interaction.user.id, 0) < seed_data["sheckles"]:
+            return await interaction.response.send_message("❌ Not enough sheckles!", ephemeral=True)
+            
+        # Check quest requirement
+        if seed_data["quest"] > 0 and user_message_counts.get(interaction.user.id, 0) < seed_data["quest"]:
+            return await interaction.response.send_message(f"❌ You need to send {seed_data['quest']} messages to unlock this seed!", ephemeral=True)
+            
+        # Deduct sheckles and add seed
+        user_sheckles[interaction.user.id] -= seed_data["sheckles"]
+        grow_time = time.time() + random.randint(300, 600)
+        user_inventory[interaction.user.id]["growing"].append(GrowingSeed(seed, grow_time))
+        return await interaction.response.send_message(f"✅ Purchased limited {seed} seed for {seed_data['sheckles']} sheckles! It will be ready in {int(grow_time - time.time())} seconds.")
+    
+    # Seed not found
+    else:
+        await interaction.response.send_message("❌ Seed not found in shop. Use `/shoplist` to see available seeds.", ephemeral=True)
+
 @tree.command(name="trade_offer")
 @app_commands.describe(user="User to offer trade to", seed="Seed name to trade")
 async def trade_offer(interaction: discord.Interaction, user: discord.Member, seed: str):
+    # First update the inventory to move finished seeds
+    update_growing_seeds(interaction.user.id)
+    
     sender_id = interaction.user.id
     recipient_id = user.id
     seed = seed.capitalize()
@@ -241,6 +307,9 @@ async def trade_offer(interaction: discord.Interaction, user: discord.Member, se
 
 @tree.command(name="trade_accept")
 async def trade_accept(interaction: discord.Interaction):
+    # First update the inventory to move finished seeds
+    update_growing_seeds(interaction.user.id)
+    
     recipient_id = interaction.user.id
     offer = trade_offers.get(recipient_id)
     if not offer:
@@ -290,55 +359,28 @@ async def trade_decline(interaction: discord.Interaction):
 
 @tree.command(name="shoplist")
 async def shoplist(interaction: discord.Interaction):
+    # Regular shop items
     shop_items = [f"{name} - {cost} sheckles" for name, (cost, quest) in seeds.items() if cost > 0]
-    if not shop_items:
+    
+    # Limited time shop items
+    current_time = time.time()
+    limited_items = []
+    for name, data in limited_seeds.items():
+        if current_time < data["expires"]:
+            quest_req = f" (Requires {data['quest']} messages)" if data["quest"] > 0 else ""
+            limited_items.append(f"{name} - {data['sheckles']} sheckles{quest_req} (Limited time!)")
+    
+    if not shop_items and not limited_items:
         await interaction.response.send_message("🛒 No seeds available for purchase right now.")
         return
-    embed = discord.Embed(title="🛒 Seed Shop List", description="\n".join(shop_items), color=discord.Color.blue())
+    
+    embed = discord.Embed(title="🛒 Seed Shop List", color=discord.Color.blue())
+    if shop_items:
+        embed.add_field(name="Regular Seeds", value="\n".join(shop_items) or "None", inline=False)
+    if limited_items:
+        embed.add_field(name="Limited Time Seeds", value="\n".join(limited_items) or "None", inline=False)
+    
     await interaction.response.send_message(embed=embed)
-
-@tree.command(name="buy_seed")
-@app_commands.describe(seed="Seed name to purchase")
-async def buy_seed(interaction: discord.Interaction, seed: str):
-    seed = seed.capitalize()
-    
-    # Check if seed exists in regular shop
-    if seed in seeds:
-        cost, _ = seeds[seed]
-        if cost <= 0:
-            return await interaction.response.send_message("❌ This seed is not for sale.", ephemeral=True)
-            
-        if user_sheckles.get(interaction.user.id, 0) < cost:
-            return await interaction.response.send_message("❌ Not enough sheckles!", ephemeral=True)
-            
-        # Deduct sheckles and add seed
-        user_sheckles[interaction.user.id] -= cost
-        grow_time = time.time() + random.randint(300, 600)
-        user_inventory[interaction.user.id]["growing"].append(GrowingSeed(seed, grow_time))
-        return await interaction.response.send_message(f"✅ Purchased {seed} seed for {cost} sheckles! It will be ready in {int(grow_time - time.time())} seconds.")
-    
-    # Check if seed exists in limited shop
-    elif seed in limited_seeds:
-        seed_data = limited_seeds[seed]
-        if time.time() > seed_data["expires"]:
-            return await interaction.response.send_message("❌ This limited seed is no longer available.", ephemeral=True)
-            
-        if user_sheckles.get(interaction.user.id, 0) < seed_data["sheckles"]:
-            return await interaction.response.send_message("❌ Not enough sheckles!", ephemeral=True)
-            
-        # Check quest requirement
-        if seed_data["quest"] > 0 and user_message_counts.get(interaction.user.id, 0) < seed_data["quest"]:
-            return await interaction.response.send_message(f"❌ You need to send {seed_data['quest']} messages to unlock this seed!", ephemeral=True)
-            
-        # Deduct sheckles and add seed
-        user_sheckles[interaction.user.id] -= seed_data["sheckles"]
-        grow_time = time.time() + random.randint(300, 600)
-        user_inventory[interaction.user.id]["growing"].append(GrowingSeed(seed, grow_time))
-        return await interaction.response.send_message(f"✅ Purchased limited {seed} seed for {seed_data['sheckles']} sheckles! It will be ready in {int(grow_time - time.time())} seconds.")
-    
-    # Seed not found
-    else:
-        await interaction.response.send_message("❌ Seed not found in shop. Use `/shoplist` to see available seeds.", ephemeral=True)
 
 @bot.event
 async def on_message(message):
