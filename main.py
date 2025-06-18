@@ -19,19 +19,19 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 tree = bot.tree
 
 GIVEAWAY_CHANNEL_NAME = "🎁︱𝒩𝓊𝓂𝒷𝑒𝓇-𝒢𝒾𝓋𝑒𝒶𝓌𝒶𝓎"
-ADMIN_ROLES = ["𝓞𝔀𝓷𝓮𝓻 👑", "𓂀 𝒞𝑜-𝒪𝓌𝓃𝑒𝓇 𓂀✅", "Administrator™🌟"]
+ADMIN_ROLES = ["𝓞𝔀𝓃𝓮𝓇 👑", "𓂀 𝒞𝑜-𝒪𝓌𝓃𝑒𝓇 𓂀✅", "Administrator™🌟"]
 
 active_giveaways = {}
 user_message_counts = defaultdict(int)
 user_inventory = defaultdict(lambda: {"growing": [], "grown": []})
-user_sheckles = defaultdict(int)  # <-- added here
-
+user_sheckles = defaultdict(int)
 seeds = {
-    "Carrot": (0, 250),   # cost 0 means not purchasable, quest seed
-    "Potato": (5, 0),     # purchasable for 5 sheckles
+    "Carrot": (0, 250),
+    "Potato": (5, 0),
 }
-
 limited_seeds = {}
+
+trade_offers = {}  # user_id -> dict with keys: sender_id, seed_name, timestamp
 
 class Giveaway:
     def __init__(self, hoster, prize, winners, number_range, target, duration, channel):
@@ -194,21 +194,85 @@ async def give_seed(interaction: discord.Interaction, user: discord.Member, seed
     user_inventory[user.id]["growing"].append(GrowingSeed(seed, grow_time))
     await interaction.response.send_message(f"✅ Gave {seed} to {user.mention}")
 
-@tree.command(name="trade_seed")
-@app_commands.describe(user="User to trade seed to", seed="Seed name to trade")
-async def trade_seed(interaction: discord.Interaction, user: discord.Member, seed: str):
+@tree.command(name="trade_offer")
+@app_commands.describe(user="User to offer trade to", seed="Seed name to trade")
+async def trade_offer(interaction: discord.Interaction, user: discord.Member, seed: str):
     sender_id = interaction.user.id
     recipient_id = user.id
+    seed = seed.capitalize()
     sender_inventory = user_inventory[sender_id]["grown"]
 
-    for i, grown_seed in enumerate(sender_inventory):
+    # Check sender owns the seed
+    for grown_seed in sender_inventory:
         if grown_seed.name.lower() == seed.lower():
-            sender_inventory.pop(i)
-            user_inventory[recipient_id]["grown"].append(GrowingSeed(grown_seed.name, time.time()))
-            await interaction.response.send_message(f"🔁 {interaction.user.mention} traded {grown_seed.name} to {user.mention}")
+            # Check if recipient already has a pending trade
+            if recipient_id in trade_offers:
+                return await interaction.response.send_message("❌ That user already has a pending trade offer.", ephemeral=True)
+            # Store the offer with a timestamp
+            trade_offers[recipient_id] = {
+                "sender_id": sender_id,
+                "seed_name": seed,
+                "timestamp": time.time()
+            }
+            await interaction.response.send_message(f"✅ Trade offer sent to {user.mention} for seed {seed}. They can `/trade_accept` or `/trade_decline` within 5 minutes.")
+            try:
+                await user.send(f"🔔 You have received a trade offer from {interaction.user.mention} for a **{seed}** seed.\n"
+                                f"Run `/trade_accept` to accept or `/trade_decline` to decline. Offer expires in 5 minutes.")
+            except:
+                # Could not DM user, but offer still stands
+                pass
             return
 
-    await interaction.response.send_message("❌ You don’t have that grown seed to trade.", ephemeral=True)
+    await interaction.response.send_message("❌ You don’t have that grown seed to offer.", ephemeral=True)
+
+@tree.command(name="trade_accept")
+async def trade_accept(interaction: discord.Interaction):
+    recipient_id = interaction.user.id
+    offer = trade_offers.get(recipient_id)
+    if not offer:
+        return await interaction.response.send_message("❌ You have no pending trade offers.", ephemeral=True)
+
+    sender_id = offer["sender_id"]
+    seed = offer["seed_name"]
+
+    # Check offer expiration (5 minutes)
+    if time.time() - offer["timestamp"] > 300:
+        trade_offers.pop(recipient_id)
+        return await interaction.response.send_message("❌ Trade offer expired.", ephemeral=True)
+
+    sender_inventory = user_inventory[sender_id]["grown"]
+
+    # Check sender still has the seed
+    for i, grown_seed in enumerate(sender_inventory):
+        if grown_seed.name.lower() == seed.lower():
+            # Remove from sender and add to recipient
+            sender_inventory.pop(i)
+            user_inventory[recipient_id]["grown"].append(GrowingSeed(seed, time.time()))
+            trade_offers.pop(recipient_id)
+            await interaction.response.send_message(f"✅ Trade accepted! You received a {seed} seed from <@{sender_id}>.")
+            try:
+                sender = await bot.fetch_user(sender_id)
+                await sender.send(f"✅ Your trade offer of {seed} to {interaction.user.mention} was accepted.")
+            except:
+                pass
+            return
+
+    # If sender no longer has the seed
+    trade_offers.pop(recipient_id)
+    await interaction.response.send_message("❌ The sender no longer has the seed to trade.", ephemeral=True)
+
+@tree.command(name="trade_decline")
+async def trade_decline(interaction: discord.Interaction):
+    recipient_id = interaction.user.id
+    offer = trade_offers.pop(recipient_id, None)
+    if not offer:
+        return await interaction.response.send_message("❌ You have no pending trade offers.", ephemeral=True)
+    try:
+        sender = await bot.fetch_user(offer["sender_id"])
+        await sender.send(f"❌ Your trade offer for {offer['seed_name']} was declined by {interaction.user.mention}.")
+    except:
+        pass
+    await interaction.response.send_message("❌ Trade offer declined.", ephemeral=True)
 
 @tree.command(name="shoplist")
 async def shoplist(interaction: discord.Interaction):
@@ -216,43 +280,34 @@ async def shoplist(interaction: discord.Interaction):
     if not shop_items:
         await interaction.response.send_message("🛒 No seeds available for purchase right now.")
         return
-    embed = discord.Embed(title="🛒 Seeds Shop List", description="\n".join(shop_items), color=discord.Color.blue())
+    embed = discord.Embed(title="🛒 Seed Shop List", description="\n".join(shop_items), color=discord.Color.blue())
     await interaction.response.send_message(embed=embed)
-
-@tree.command(name="buy")
-@app_commands.describe(seed="Seed name to buy")
-async def buy(interaction: discord.Interaction, seed: str):
-    user_id = interaction.user.id
-    seed = seed.capitalize()
-    if seed not in seeds:
-        return await interaction.response.send_message("❌ That seed does not exist.", ephemeral=True)
-
-    cost, quest_val = seeds[seed]
-    if cost == 0:
-        return await interaction.response.send_message("❌ This seed cannot be bought, it's only obtainable via quest.", ephemeral=True)
-
-    user_balance = user_sheckles.get(user_id, 0)
-    if user_balance < cost:
-        return await interaction.response.send_message(f"❌ You don't have enough sheckles. You have {user_balance}, but need {cost}.", ephemeral=True)
-
-    # Deduct sheckles and add growing seed
-    user_sheckles[user_id] = user_balance - cost
-    grow_time = time.time() + random.randint(300, 600)
-    user_inventory[user_id]["growing"].append(GrowingSeed(seed, grow_time))
-
-    await interaction.response.send_message(f"✅ You bought a {seed} seed! It will finish growing soon.")
-
-@tree.command(name="sheckles")
-async def sheckles(interaction: discord.Interaction):
-    balance = user_sheckles.get(interaction.user.id, 0)
-    await interaction.response.send_message(f"💰 You have {balance} sheckles.")
 
 @bot.event
 async def on_message(message):
     if message.author.bot:
         return
     user_message_counts[message.author.id] += 1
+
+    # Handle giveaway guessing
+    giveaway = active_giveaways.get(message.channel.id)
+    if giveaway:
+        try:
+            guess = int(message.content)
+        except:
+            return
+        correct = giveaway.check_guess(message.author, guess)
+        if correct is None:
+            return
+        if correct:
+            giveaway.winners.add(message.author)
+            if len(giveaway.winners) >= giveaway.winners_required:
+                await end_giveaway(giveaway)
+        else:
+            # optional feedback if you want
+            pass
+
     await bot.process_commands(message)
 
-# Run your bot
+# Run your bot (replace TOKEN with your bot's token)
 bot.run(os.getenv("BOT_TOKEN"))
