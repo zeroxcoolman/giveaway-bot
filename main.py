@@ -28,8 +28,14 @@ user_inventory = defaultdict(lambda: {"growing": [], "grown": []})
 user_sheckles = defaultdict(int)
 seeds = {
     "Carrot": (0, 250),
+    "Strawberry": (10, 50), # (Sheckles, Messages For quest)
     "Potato": (5, 0),
+    "Bamboo": (20, 300),
+    "Ember Lily": (55, 550),
+    "Sugar Apple": (80, 800),
+    "Beanstalk": (70, 750),
 }
+
 limited_seeds = {}
 
 trade_offers = {}  # user_id -> dict with keys: sender_id, seed_name, timestamp
