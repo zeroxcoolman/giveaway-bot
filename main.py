@@ -417,20 +417,21 @@ async def sell_seed(interaction: discord.Interaction, seed: str, seed_type: app_
                 ephemeral=True
             )
     
-    # Define base prices for seeds (even if purchase price was 0)
+    # Define base prices for all seeds
     seed_base_prices = {
-        "Carrot": 5,      # Will sell for 2 (growing) or 5 (grown)
-        "Strawberry": 10, # Matches purchase price
-        "Potato": 5,      # Matches purchase price
-        "Bamboo": 20,     # Matches purchase price
-        "Ember Lily": 55, # Matches purchase price
-        "Sugar Apple": 80,# Matches purchase price
-        "Beanstalk": 70   # Matches purchase price
+        "Carrot": 5,
+        "Strawberry": 10,
+        "Potato": 5,
+        "Bamboo": 20,
+        "Ember Lily": 55,
+        "Sugar Apple": 80,
+        "Beanstalk": 70
     }
     
+    # Check if seed exists in our price list
     if seed not in seed_base_prices:
         return await interaction.response.send_message(
-            "❌ This seed cannot be sold (unknown seed type).",
+            f"❌ {seed} is not a valid seed type that can be sold.",
             ephemeral=True
         )
     
