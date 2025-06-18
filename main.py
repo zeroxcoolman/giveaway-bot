@@ -1,10 +1,13 @@
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 from discord import app_commands
 import os
 import asyncio
 import re
 import random
+import time
+from collections import defaultdict
+from typing import Optional
 
 intents = discord.Intents.default()
 intents.messages = True
@@ -15,11 +18,17 @@ intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 tree = bot.tree
 
-# CONFIG
 GIVEAWAY_CHANNEL_NAME = "🎁︱𝒩𝓊𝓂𝒷𝑒𝓇-𝒢𝒾𝓋𝑒𝒶𝓌𝒶𝓎"
 ADMIN_ROLES = ["𝓞𝔀𝓷𝓮𝓻 👑", "𓂀 𝒞𝑜-𝒪𝓌𝓃𝓮𝓇 𓂀✅", "Administrator™🌟"]
 
 active_giveaways = {}
+user_message_counts = defaultdict(int)
+user_inventory = defaultdict(lambda: {"growing": [], "grown": []})
+seeds = {
+    "Carrot": (0, 250),
+    "Potato": (5, 0),
+}
+limited_seeds = {}
 
 class Giveaway:
     def __init__(self, hoster, prize, winners, number_range, target, duration, channel):
@@ -41,21 +50,23 @@ class Giveaway:
         self.guessed_users[user.id] = guess
         return guess == self.target
 
-# ----------------- BOT EVENTS -----------------
+class GrowingSeed:
+    def __init__(self, name, finish_time):
+        self.name = name
+        self.finish_time = finish_time
+
+def has_admin_role(member):
+    return any(role.name in ADMIN_ROLES for role in member.roles)
+
 @bot.event
 async def on_ready():
     print(f"Logged in as {bot.user} (ID: {bot.user.id})")
     try:
         print("Syncing commands...")
-        synced_commands = await tree.sync()
-        print(f"Successfully synced {len(synced_commands)} commands:")
-        for cmd in synced_commands:
-            print(f" - {cmd.name}: {cmd.description}")
+        synced = await tree.sync()
+        print(f"Synced {len(synced)} commands")
     except Exception as e:
-        print(f"Error syncing commands: {type(e).__name__}: {e}")
-
-def has_admin_role(member):
-    return any(role.name in ADMIN_ROLES for role in member.roles)
+        print(f"Failed to sync: {e}")
 
 async def end_giveaway(giveaway):
     if giveaway.task:
@@ -64,9 +75,7 @@ async def end_giveaway(giveaway):
     for winner in giveaway.winners:
         try:
             await winner.send(
-                f"🎉 You won the giveaway in {giveaway.channel.mention}!\n"
-                f"**Prize:** {giveaway.prize}\n"
-                f"Contact {giveaway.hoster.mention} to claim your reward!"
+                f"🎉 You won the giveaway in {giveaway.channel.mention}!\n**Prize:** {giveaway.prize}\nContact {giveaway.hoster.mention} to claim your reward!"
             )
         except:
             pass
@@ -78,62 +87,53 @@ async def end_giveaway(giveaway):
         color=discord.Color.green()
     )
     await giveaway.channel.send(embed=embed)
-    await giveaway.channel.set_permissions(
-        giveaway.channel.guild.default_role,
-        send_messages=False
-    )
-    if giveaway.channel.id in active_giveaways:
-        del active_giveaways[giveaway.channel.id]
+    await giveaway.channel.set_permissions(giveaway.channel.guild.default_role, send_messages=False)
+    active_giveaways.pop(giveaway.channel.id, None)
 
-@tree.command(name="giveaway", description="Start a number guessing giveaway")
+@tree.command(name="add_limited_seed")
+@app_commands.describe(name="Seed name", sheckles="Sheckle cost", quest_value="Quest value", duration_minutes="How long it's available")
+async def add_limited_seed(interaction: discord.Interaction, name: str, sheckles: int, quest_value: int, duration_minutes: int):
+    if not has_admin_role(interaction.user):
+        return await interaction.response.send_message("❌ Not allowed", ephemeral=True)
+    limited_seeds[name] = {
+        "sheckles": sheckles,
+        "quest": quest_value,
+        "expires": time.time() + (duration_minutes * 60)
+    }
+    await interaction.response.send_message(f"✅ Limited seed **{name}** added. Available for {duration_minutes} minutes.")
+
+@tree.command(name="giveaway")
 @app_commands.describe(
-    winners="Number of winners",
-    prize="Prize for winners",
-    range_="Number range (e.g. 1-100)",
-    hoster="Who's hosting",
-    duration="Duration in minutes (0=no limit)",
-    target="Target number (random if empty)"
+    winners="Number of winners", prize="Prize", number_range="Range (1-100)",
+    hoster="Hoster", duration="Duration in minutes", target="Optional target number"
 )
-async def start_giveaway(interaction: discord.Interaction, winners: int, prize: str, range_: str,
-                         hoster: discord.Member, duration: int = 0, target: int = None):
+async def start_giveaway(interaction: discord.Interaction, winners: int, prize: str, number_range: str, hoster: discord.Member, duration: int = 0, target: Optional[int] = None):
     await interaction.response.defer()
 
     if interaction.channel.name != GIVEAWAY_CHANNEL_NAME and not has_admin_role(interaction.user):
         return await interaction.followup.send("❌ Use the giveaway channel!", ephemeral=True)
-
     if interaction.channel.id in active_giveaways:
         return await interaction.followup.send("❌ Giveaway already running here!", ephemeral=True)
 
-    match = re.match(r"(\d+)-(\d+)", range_)
-    if not match or int(match[1]) >= int(match[2]):
-        return await interaction.followup.send("❌ Invalid range (use format like 1-100)", ephemeral=True)
-
+    match = re.match(r"(\d+)-(\d+)", number_range)
+    if not match:
+        return await interaction.followup.send("❌ Invalid range!", ephemeral=True)
     low, high = int(match[1]), int(match[2])
-    target = target or random.randint(low, high)
+    if low >= high:
+        return await interaction.followup.send("❌ Invalid range!", ephemeral=True)
 
+    target = target or random.randint(low, high)
     giveaway = Giveaway(hoster, prize, winners, (low, high), target, duration, interaction.channel)
     active_giveaways[interaction.channel.id] = giveaway
 
-    await interaction.channel.set_permissions(
-        interaction.guild.default_role,
-        send_messages=True
-    )
+    await interaction.channel.set_permissions(interaction.guild.default_role, send_messages=True)
     await interaction.channel.edit(slowmode_delay=2)
 
     embed = discord.Embed(
         title="🎉 NUMBER GUESS GIVEAWAY",
         description=(
-            f"**Host:** {hoster.mention}\n"
-            f"**Range:** {low}-{high}\n"
-            f"**Prize:** {prize}\n"
-            f"**Winners Needed:** {winners}\n"
-            f"**Duration:** {'No limit' if duration == 0 else f'{duration} minutes'}\n\n"
-            "**How to Play:**\n"
-            "1. Guess a number in the range\n"
-            "2. 2-second cooldown between guesses\n"
-            "3. Host can't win\n"
-            f"4. Use `/stop_giveaway` or DM me 'stop' to end early\n\n"
-            "Winners will receive prize details via DM!"
+            f"**Host:** {hoster.mention}\n**Range:** {low}-{high}\n**Prize:** {prize}\n"
+            f"**Winners:** {winners}\n**Duration:** {'No limit' if duration == 0 else f'{duration} min'}"
         ),
         color=discord.Color.gold()
     )
@@ -147,41 +147,95 @@ async def schedule_giveaway_end(giveaway):
     if giveaway.channel.id in active_giveaways:
         await end_giveaway(giveaway)
 
-@tree.command(name="stop_giveaway", description="End the current giveaway")
+@tree.command(name="stop_giveaway")
 async def stop_giveaway(interaction: discord.Interaction):
     await interaction.response.defer()
-
     giveaway = active_giveaways.get(interaction.channel.id)
     if not giveaway:
-        return await interaction.followup.send("❌ No active giveaway here", ephemeral=True)
-
+        return await interaction.followup.send("❌ No active giveaway", ephemeral=True)
     if interaction.user.id != giveaway.hoster.id and not has_admin_role(interaction.user):
-        return await interaction.followup.send("❌ Only the host can stop this", ephemeral=True)
-
+        return await interaction.followup.send("❌ Not allowed", ephemeral=True)
     await interaction.followup.send("🛑 Ending giveaway...")
     await end_giveaway(giveaway)
 
+@tree.command(name="inventory")
+async def inventory(interaction: discord.Interaction):
+    inv = user_inventory[interaction.user.id]
+    grown = ', '.join(p.name for p in inv["grown"]) or 'None'
+    growing = ', '.join(f"{p.name} ({int(p.finish_time - time.time())}s left)" for p in inv["growing"] if p.finish_time > time.time()) or 'None'
+    embed = discord.Embed(title="🌱 Your Garden", color=discord.Color.green())
+    embed.add_field(name="🌾 Growing", value=growing, inline=False)
+    embed.add_field(name="🥕 Grown", value=grown, inline=False)
+    await interaction.response.send_message(embed=embed)
+
+@tree.command(name="closest_quest")
+async def closest_quest(interaction: discord.Interaction):
+    count = user_message_counts[interaction.user.id]
+    closest = None
+    diff = float('inf')
+    for name, (sheck, quest) in seeds.items():
+        if quest > 0 and (quest - count) < diff and count < quest:
+            closest = (name, quest - count)
+            diff = quest - count
+    msg = f"Closest quest seed: {closest[0]} ({closest[1]} messages left)" if closest else "You have completed all quests!"
+    await interaction.response.send_message(msg)
+
+@tree.command(name="give_seed")
+@app_commands.describe(user="User to give seed to", seed="Seed name")
+async def give_seed(interaction: discord.Interaction, user: discord.Member, seed: str):
+    if not has_admin_role(interaction.user):
+        return await interaction.response.send_message("❌ Not allowed", ephemeral=True)
+    grow_time = time.time() + random.randint(300, 600)
+    user_inventory[user.id]["growing"].append(GrowingSeed(seed, grow_time))
+    await interaction.response.send_message(f"✅ Gave {seed} to {user.mention}")
+
+@tree.command(name="trade_seed")
+@app_commands.describe(user="User to trade seed to", seed="Seed name to trade")
+async def trade_seed(interaction: discord.Interaction, user: discord.Member, seed: str):
+    sender_id = interaction.user.id
+    recipient_id = user.id
+    sender_inventory = user_inventory[sender_id]["grown"]
+
+    for i, grown_seed in enumerate(sender_inventory):
+        if grown_seed.name.lower() == seed.lower():
+            sender_inventory.pop(i)
+            user_inventory[recipient_id]["grown"].append(GrowingSeed(grown_seed.name, time.time()))
+            await interaction.response.send_message(f"🔁 {interaction.user.mention} traded {grown_seed.name} to {user.mention}")
+            return
+
+    await interaction.response.send_message("❌ You don’t have that grown seed to trade.", ephemeral=True)
+
 @bot.event
 async def on_message(message):
-    if isinstance(message.channel, discord.DMChannel):
-        for giveaway in list(active_giveaways.values()):
-            if message.author.id == giveaway.hoster.id and message.content.lower() in ["stop", "end", "cancel"]:
-                await message.channel.send("🛑 Stopping your giveaway...")
-                await end_giveaway(giveaway)
+    await bot.process_commands(message)
+    if message.author.bot:
         return
 
-    if message.author.bot or message.channel.id not in active_giveaways:
+    user_message_counts[message.author.id] += 1
+
+    for name, (sheck, quest) in seeds.items():
+        if quest > 0 and user_message_counts[message.author.id] >= quest:
+            if name not in [s.name for s in user_inventory[message.author.id]["grown"]]:
+                grow_time = time.time() + random.randint(300, 600)
+                user_inventory[message.author.id]["growing"].append(GrowingSeed(name, grow_time))
+                await message.channel.send(f"🌱 {message.author.mention} earned a {name} seed from a quest!")
+
+    for seed in user_inventory[message.author.id]["growing"][:]:
+        if time.time() >= seed.finish_time:
+            user_inventory[message.author.id]["growing"].remove(seed)
+            user_inventory[message.author.id]["grown"].append(seed)
+
+    if message.channel.id not in active_giveaways:
         return
 
     giveaway = active_giveaways[message.channel.id]
-
     try:
         guess = int(message.content.strip())
     except ValueError:
         return
 
     if not (giveaway.low <= guess <= giveaway.high):
-        await message.channel.send(f"{message.author.mention} ❌ Must be between {giveaway.low}-{giveaway.high}!", delete_after=3)
+        await message.channel.send(f"{message.author.mention} ❌ Guess must be between {giveaway.low}-{giveaway.high}", delete_after=3)
         return
 
     result = giveaway.check_guess(message.author, guess)
@@ -190,22 +244,14 @@ async def on_message(message):
     elif result:
         await message.channel.send(f"🎉 {message.author.mention} guessed correctly!")
         giveaway.winners.add(message.author)
-
         try:
-            await message.author.send(
-                f"🎊 You guessed the number in {giveaway.channel.mention}!\n"
-                f"**Prize:** {giveaway.prize}\n"
-                f"The host {giveaway.hoster.mention} will contact you soon."
-            )
+            await message.author.send(f"🎊 You won in {giveaway.channel.mention}! Prize: {giveaway.prize}")
         except:
-            await message.channel.send(f"{message.author.mention} Couldn't DM you - enable DMs to receive your prize info!", delete_after=10)
-
+            await message.channel.send(f"{message.author.mention} I couldn't DM you!", delete_after=10)
         if len(giveaway.winners) >= giveaway.winners_required:
             await end_giveaway(giveaway)
 
 try:
-    print("Attempting to start bot...")
     bot.run(os.getenv("BOT_TOKEN"))
 except Exception as e:
-    print(f"Failed to start bot: {type(e).__name__}: {e}")
-    raise
+    print(f"Bot failed: {e}")
