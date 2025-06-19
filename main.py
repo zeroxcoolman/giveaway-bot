@@ -424,7 +424,7 @@ def normalize_seed_name(raw: str):
     return base, mut, combined
 
 def find_matching_seed(seed_list, desired_input):
-    base, mut, _ = normalize_seed_input(desired_input)
+    base, mut, _ = normalize_seed_name(desired_input)
     for s in seed_list:
         if s.name != base:
             continue
