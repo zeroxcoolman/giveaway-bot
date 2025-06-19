@@ -393,7 +393,18 @@ async def give_seed(interaction: discord.Interaction, user: discord.Member, seed
         return await interaction.response.send_message("❌ Invalid seed name.", ephemeral=True)
 
     grow_time = time.time() + random.randint(300, 600)
-    seed_obj = GrowingSeed(base, grow_time)
+    
+    # Check if this is a limited seed and set the flag accordingly
+    is_limited = base in limited_seeds
+    allowed_mutations = limited_seeds[base].get("mutations") if is_limited else None
+    
+    seed_obj = GrowingSeed(
+        base, 
+        grow_time, 
+        limited=is_limited,  # <-- This is what was missing
+        allowed_mutations=allowed_mutations
+    )
+    
     user_inventory[user.id]["growing"].append(seed_obj)
     await interaction.response.send_message(f"✅ Gave {pretty_seed(seed_obj)} to {user.mention}")
 
@@ -814,7 +825,7 @@ async def manual_refresh(interaction: discord.Interaction):
     await interaction.response.send_message("🔁 Stock refreshed!", ephemeral=True)
 
 @tree.command(name="growinstant")
-@app_commands.describe(user="User whose plant to instantly grow", plant="Plant name, e.g. 'Carrot' or 'Ember Lily (Inferno)'")
+@app_commands.describe(user="User whose plant to instantly grow", plant="Plant name")
 async def growinstant(interaction: discord.Interaction, user: discord.Member, plant: str):
     if not has_admin_role(interaction.user):
         return await interaction.response.send_message("❌ Not allowed", ephemeral=True)
@@ -828,11 +839,18 @@ async def growinstant(interaction: discord.Interaction, user: discord.Member, pl
     if not match:
         return await interaction.response.send_message(f"❌ No matching growing seed found for {user.mention}.", ephemeral=True)
 
-    # Move seed to grown instantly
+    # Preserve the limited status when moving to grown
+    grown_seed = GrowingSeed(
+        match.name,
+        time.time(),  # Instant grow
+        mutation=match.mutation,
+        limited=getattr(match, "limited", False)  # <-- Preserve limited status
+    )
+    
     growing.remove(match)
-    user_inventory[user.id]["grown"].append(match)
+    user_inventory[user.id]["grown"].append(grown_seed)
 
-    await interaction.response.send_message(f"🌱 Instantly grew {pretty_seed(match)} for {user.mention}.", ephemeral=True)
+    await interaction.response.send_message(f"🌱 Instantly grew {pretty_seed(grown_seed)} for {user.mention}.", ephemeral=True)
 
 @bot.event
 async def on_message(message):
