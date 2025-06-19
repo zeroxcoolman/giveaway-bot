@@ -681,7 +681,7 @@ async def shoplist(interaction: discord.Interaction):
         for seed in active_limited:
             data = limited_seeds[seed]
             mut_display = "All mutations" if data["mutations"] is None else ", ".join(data["mutations"])
-            time_left = int((data["expires"] - time.time()) // 60  # Minutes remaining
+            time_left = int((data["expires"] - time.time())) // 60  # Minutes remaining
             
             value = (
                 f"{data['sheckles']} sheckles\n"
