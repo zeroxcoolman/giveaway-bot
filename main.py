@@ -19,7 +19,7 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 tree = bot.tree
 
 GIVEAWAY_CHANNEL_NAME = "🎁︱𝒩𝓊𝓂𝒷𝑒𝓇-𝒢𝒾𝓋𝑒𝒶𝓌𝒶𝓎"
-ADMIN_ROLES = ["𝓞𝔀𝓷𝓮𝓻 👑", "𓂀 𝒞𝑜-𝒪𝓌𝓃𝑒𝓇 𓂀✅", "Administrator™🌟"]
+ADMIN_ROLES = ["𝓞𝔀𝓷𝓮𝓻 👑", "Tuff nonchalant aurafarmer sigma pro admin", "Administrator™🌟"]
 MESSAGES_PER_SHECKLE = 10  # Number of messages needed to earn 1 sheckle
 
 active_giveaways = {}
