@@ -440,35 +440,35 @@ async def trade_offer(interaction: discord.Interaction, user: discord.Member, yo
 
     sender_id = interaction.user.id
     recipient_id = user.id
-    sender_seed_obj = find_matching_seed(user_inventory[sender_id]["grown"], yourseed)
-    recipient_seed_obj = find_matching_seed(user_inventory[recipient_id]["grown"], theirseed)
 
     if recipient_id in trade_offers:
         return await interaction.response.send_message("❌ That user already has a pending trade offer.", ephemeral=True)
 
-    sender_seeds = [s.name for s in user_inventory[sender_id]["grown"]]
-    recipient_seeds = [s.name for s in user_inventory[recipient_id]["grown"]]
+    sender_seed_obj = find_matching_seed(user_inventory[sender_id]["grown"], yourseed)
+    recipient_seed_obj = find_matching_seed(user_inventory[recipient_id]["grown"], theirseed)
 
     if not sender_seed_obj:
         return await interaction.response.send_message("❌ You don't have that grown seed to offer.", ephemeral=True)
     if not recipient_seed_obj:
         return await interaction.response.send_message(f"❌ {user.mention} doesn't have that seed or it's still growing.", ephemeral=True)
 
+    # Store raw data (not pretty printed) for exact match later
     trade_offers[recipient_id] = {
         "sender_id": sender_id,
-        "sender_seed": pretty_seed(sender_seed_obj),
-        "recipient_seed": pretty_seed(recipient_seed_obj),
+        "sender_seed_name": sender_seed_obj.name,
+        "sender_seed_mut": sender_seed_obj.mutation,
+        "recipient_seed_name": recipient_seed_obj.name,
+        "recipient_seed_mut": recipient_seed_obj.mutation,
         "timestamp": time.time()
     }
-
 
     await interaction.response.send_message(f"✅ Trade offer sent to {user.mention}.", ephemeral=True)
     try:
         await user.send(f"🔔 You received a trade offer from {interaction.user.mention}:")
-        await user.send(f"They offer **{yourseed}** for your **{theirseed}**.")
+        await user.send(f"They offer **{pretty_seed(sender_seed_obj)}** for your **{pretty_seed(recipient_seed_obj)}**.")
         await user.send("Use `/trade_accept @user` or `/trade_decline @user`.")
-    except:
-        pass
+    except Exception as e:
+        print("Failed to DM user about trade:", e)
 
 @tree.command(name="trade_accept")
 @app_commands.describe(user="User who sent the trade offer")
@@ -488,25 +488,23 @@ async def trade_accept(interaction: discord.Interaction, user: discord.Member):
         trade_offers.pop(recipient_id)
         return await interaction.response.send_message("❌ Trade offer expired.", ephemeral=True)
 
-    # Validate ownership
     sender_grown = user_inventory[sender_id]["grown"]
     recipient_grown = user_inventory[recipient_id]["grown"]
 
-    sender_seed = find_matching_seed(sender_grown, offer["sender_seed"])
-    recipient_seed = find_matching_seed(recipient_grown, offer["recipient_seed"])
+    # Find exact matching seeds
+    sender_seed = next((s for s in sender_grown if s.name == offer["sender_seed_name"] and s.mutation == offer["sender_seed_mut"]), None)
+    recipient_seed = next((s for s in recipient_grown if s.name == offer["recipient_seed_name"] and s.mutation == offer["recipient_seed_mut"]), None)
 
     if not sender_seed or not recipient_seed:
         trade_offers.pop(recipient_id)
         return await interaction.response.send_message("❌ One or both seeds no longer available.", ephemeral=True)
-        
-    # Perform trade
+
+    # Perform trade (swap objects directly)
     sender_grown.remove(sender_seed)
     recipient_grown.remove(recipient_seed)
     sender_grown.append(recipient_seed)
     recipient_grown.append(sender_seed)
-    
 
-    # Log it
     trade_logs.append({
         "from": sender_id,
         "to": recipient_id,
@@ -514,14 +512,19 @@ async def trade_accept(interaction: discord.Interaction, user: discord.Member):
         "got": recipient_seed.name,
         "time": time.time()
     })
+
     trade_offers.pop(recipient_id)
 
-    await interaction.response.send_message(f"✅ Trade complete! You received {sender_seed.name} and gave {recipient_seed.name}.")
+    received = pretty_seed(sender_seed)
+    given = pretty_seed(recipient_seed)
+
+    await interaction.response.send_message(f"✅ Trade complete! You received **{received}** and gave **{given}**.")
     try:
         sender_user = await bot.fetch_user(sender_id)
-        await sender_user.send(f"✅ Your trade with {interaction.user.mention} completed! You got {recipient_seed.name} and gave {sender_seed.name}.")
+        await sender_user.send(f"✅ Your trade with {interaction.user.mention} completed! You got **{given}** and gave **{received}**.")
     except:
         pass
+
 
 @tree.command(name="trade_decline")
 @app_commands.describe(user="User who sent the trade offer")
@@ -530,8 +533,10 @@ async def trade_decline(interaction: discord.Interaction, user: discord.Member):
     offer = trade_offers.get(recipient_id)
     if not offer or offer["sender_id"] != user.id:
         return await interaction.response.send_message("❌ No trade offer from that user.", ephemeral=True)
+
     trade_offers.pop(recipient_id)
     await interaction.response.send_message("❌ Trade offer declined.")
+
     try:
         sender_user = await bot.fetch_user(user.id)
         await sender_user.send(f"❌ Your trade was declined by {interaction.user.mention}.")
