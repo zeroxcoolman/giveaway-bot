@@ -131,10 +131,11 @@ class Giveaway:
         return guess == self.target
 
 class GrowingSeed:
-    def __init__(self, name, finish_time):
+    def __init__(self, name, finish_time, mutation=None, limited=False):
         self.name = name
         self.finish_time = finish_time
-        self.mutation = self.determine_mutation(name)
+        self.mutation = mutation or self.determine_mutation(name)
+        self.limited = limited
     
     def determine_mutation(self, plant_name):
         """Determine if this seed gets a special mutation"""
@@ -211,22 +212,29 @@ async def end_giveaway(giveaway):
     active_giveaways.pop(giveaway.channel.id, None)
 
 @tree.command(name="add_limited_seed")
-@app_commands.describe(name="Seed name", sheckles="Sheckle cost", quest_value="Quest value", duration_minutes="How long it's available")
-async def add_limited_seed(interaction: discord.Interaction, name: str, sheckles: int, quest_value: int, duration_minutes: int):
+@app_commands.describe(
+    name="Seed name",
+    sheckles="Sheckle cost",
+    quest_value="Quest value",
+    duration_minutes="How long it's available",
+    mutations="Optional comma-separated list of possible mutations"
+)
+async def add_limited_seed(interaction: discord.Interaction, name: str, sheckles: int, quest_value: int, duration_minutes: int, mutations: str = ""):
     if not has_admin_role(interaction.user):
         return await interaction.response.send_message("❌ Not allowed", ephemeral=True)
-    limited_seeds[name] = {
+
+    normalized_name, _, _ = normalize_seed_name(name)
+    mutation_list = [m.strip().title() for m in mutations.split(",") if m.strip()] if mutations else []
+
+    limited_seeds[normalized_name] = {
         "sheckles": sheckles,
         "quest": quest_value,
-        "expires": time.time() + (duration_minutes * 60)
+        "expires": time.time() + (duration_minutes * 60),
+        "mutations": mutation_list
     }
-    await interaction.response.send_message(f"✅ Limited seed **{name}** added. Available for {duration_minutes} minutes.")
 
-@tree.command(name="giveaway")
-@app_commands.describe(
-    winners="Number of winners", prize="Prize", number_range="Range (1-100)",
-    hoster="Hoster", duration="Duration in minutes", target="Optional target number"
-)
+    await interaction.response.send_message(f"✅ Limited seed **{normalized_name}** added. Available for {duration_minutes} minutes.")
+
 async def start_giveaway(interaction: discord.Interaction, winners: int, prize: str, number_range: str, hoster: discord.Member, duration: int = 0, target: Optional[int] = None):
     await interaction.response.defer()
 
@@ -405,7 +413,12 @@ async def buy_seed(interaction: discord.Interaction, seed: str):
         await interaction.response.send_message("❌ Seed not found in shop. Use `/shoplist` to see available seeds.", ephemeral=True)
 
 def pretty_seed(seed_obj):
-    return f"{seed_obj.name} ({seed_obj.mutation})" if seed_obj.mutation else seed_obj.name
+    name = f"{seed_obj.name}"
+    if seed_obj.mutation:
+        name += f" ({seed_obj.mutation})"
+    if getattr(seed_obj, "limited", False):
+        name += " 🌟(Limited)"
+    return name
 
 def normalize_seed_name(raw: str):
     """
