@@ -393,6 +393,9 @@ async def buy_seed(interaction: discord.Interaction, seed: str):
     else:
         await interaction.response.send_message("❌ Seed not found in shop. Use `/shoplist` to see available seeds.", ephemeral=True)
 
+def normalize_seed_name(name):
+    return ' '.join(word.capitalize() for word in name.split())
+
 @tree.command(name="trade_offer")
 @app_commands.describe(user="User to trade with", yourseed="Seed you're offering", theirseed="Seed you want")
 async def trade_offer(interaction: discord.Interaction, user: discord.Member, yourseed: str, theirseed: str):
@@ -401,8 +404,8 @@ async def trade_offer(interaction: discord.Interaction, user: discord.Member, yo
 
     sender_id = interaction.user.id
     recipient_id = user.id
-    yourseed = yourseed.capitalize()
-    theirseed = theirseed.capitalize()
+    yourseed = normalize_seed_name(yourseed)
+    theirseed = normalize_seed_name(theirseed)
 
     if recipient_id in trade_offers:
         return await interaction.response.send_message("❌ That user already has a pending trade offer.", ephemeral=True)
@@ -504,8 +507,7 @@ async def view_trade_offers(interaction: discord.Interaction):
         return await interaction.response.send_message("📭 You have no pending trade offers.", ephemeral=True)
     sender = await bot.fetch_user(offer["sender_id"])
     msg = (
-        f"🔁 Pending Trade:"
-        
+        f"🔁 Pending Trade:\n"
         f"From: {sender.mention}\n"
         f"They offer: {offer['sender_seed']}\n"
         f"They want: {offer['recipient_seed']}\n"
