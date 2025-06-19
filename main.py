@@ -671,47 +671,56 @@ async def trade_logs_command(interaction: discord.Interaction):
 
 @tree.command(name="shoplist")
 async def shoplist(interaction: discord.Interaction):
-    # PURGE expired seeds FIRST
+    # Purge expired limited seeds first
     global limited_seeds
     limited_seeds = {
         name: data for name, data in limited_seeds.items()
-        if time.time() < data["expires"] and data["sheckles"] > 0  # Double-check
+        if time.time() < data["expires"] and data["sheckles"] > 0
     }
-    
+
     embed = discord.Embed(title="🛒 Seed Shop", color=discord.Color.purple())
-    
-    # Regular stock (unchanged)
-    if current_stock:
-        embed.add_field(name="🔹 Regular Stock", value="─────────────", inline=False)
+
+    # --- REGULAR STOCK SECTION --- (FIXED)
+    if current_stock:  # Only show if there are regular seeds
+        regular_seeds = []
         for seed in current_stock:
-            cost, _ = seeds[seed]
-            rarity = SEED_RARITIES.get(seed, "Unknown")
-            embed.add_field(name=seed, value=f"{cost} sheckles\nRarity: {rarity}", inline=True)
-    
-    # LIMITED SEEDS - Only show if time left > 0 AND valid data
+            if seed in seeds:  # Verify seed exists in main dictionary
+                cost, quest = seeds[seed]
+                rarity = SEED_RARITIES.get(seed, "Unknown")
+                regular_seeds.append(f"**{seed}** - {cost} sheckles ({rarity})")
+        
+        if regular_seeds:  # Only add section if there are valid regular seeds
+            embed.add_field(
+                name="🔹 Regular Stock",
+                value="\n".join(regular_seeds) or "No regular seeds available",
+                inline=False
+            )
+
+    # --- LIMITED SEEDS SECTION ---
     active_limited = [
         (name, data) for name, data in limited_seeds.items()
-        if (time.time() < data["expires"] and 
-            data["sheckles"] > 0 and 
-            (data.get("quest", 0) >= 0))  # Optional: Check for negative quests
+        if (time.time() < data["expires"] and data["sheckles"] > 0)
     ]
-    
+
     if active_limited:
-        embed.add_field(name="🌟 Limited-Time Seeds", value="─────────────", inline=False)
+        limited_display = []
         for name, data in active_limited:
-            time_left = max(0, int((data["expires"] - time.time()) // 60))  # Minutes left
+            time_left = max(0, int((data["expires"] - time.time()) // 60)
             muts = "All mutations" if data.get("mutations") is None else ", ".join(data["mutations"])
-            embed.add_field(
-                name=name,
-                value=(
-                    f"{data['sheckles']} sheckles\n"
-                    f"Quest: {data['quest']} messages\n"
-                    f"Mutations: {muts}\n"
-                    f"⏳ {time_left} minutes left"
-                ),
-                inline=True
+            limited_display.append(
+                f"**{name}**\n"
+                f"- Cost: {data['sheckles']} sheckles\n"
+                f"- Quest: {data['quest']} messages\n"
+                f"- Mutations: {muts}\n"
+                f"- Time left: {time_left} minutes"
             )
-    
+        
+        embed.add_field(
+            name="🌟 Limited-Time Seeds",
+            value="\n".join(limited_display) or "No active limited seeds",
+            inline=False
+        )
+
     await interaction.response.send_message(embed=embed)
 
 @tree.command(name="sell_seed")
