@@ -614,8 +614,15 @@ async def view_trade_offers(interaction: discord.Interaction):
 
     sender = await bot.fetch_user(offer["sender_id"])
 
-    from_seed = f"{offer['sender_seed_name']} ({offer['sender_seed_mut']})" if offer['sender_seed_mut'] else offer['sender_seed_name']
-    to_seed = f"{offer['recipient_seed_name']} ({offer['recipient_seed_mut']})" if offer['recipient_seed_mut'] else offer['recipient_seed_name']
+    # Fetch the real objects from inventory so we can use pretty_seed()
+    sender_grown = user_inventory[offer["sender_id"]]["grown"]
+    recipient_grown = user_inventory[interaction.user.id]["grown"]
+    
+    sender_seed = next((s for s in sender_grown if s.name == offer["sender_seed_name"] and s.mutation == offer["sender_seed_mut"]), None)
+    recipient_seed = next((s for s in recipient_grown if s.name == offer["recipient_seed_name"] and s.mutation == offer["recipient_seed_mut"]), None)
+    
+    from_seed = pretty_seed(sender_seed) if sender_seed else offer["sender_seed_name"]
+    to_seed = pretty_seed(recipient_seed) if recipient_seed else offer["recipient_seed_name"]
 
     msg = (
         f"🔁 Pending Trade:\n"
