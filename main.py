@@ -812,15 +812,18 @@ def update_growing_seeds(user_id):
 
 @tasks.loop(minutes=5)
 async def refresh_stock():
-    global limited_seeds
+    global current_stock, limited_seeds  # Add current_stock to globals
+    
+    # Clean expired limited seeds
     limited_seeds = {
         name: data for name, data in limited_seeds.items()
         if time.time() < data["expires"]
     }
-
-    current_stock = []
-
-    # First pass: randomly add seeds based on rarity chance
+    
+    # Now modify the GLOBAL current_stock
+    current_stock = []  # ✅ This modifies the global variable
+    
+    # Rest of your stock refresh logic...
     for seed, rarity in SEED_RARITIES.items():
         if random.random() < RARITY_CHANCES[rarity]:
             current_stock.append(seed)
