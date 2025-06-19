@@ -334,14 +334,16 @@ async def closest_quest(interaction: discord.Interaction):
 async def give_seed(interaction: discord.Interaction, user: discord.Member, seed: str):
     if not has_admin_role(interaction.user):
         return await interaction.response.send_message("❌ Not allowed", ephemeral=True)
-    
-    seed = normalize_seed_name(seed)
-    if seed not in seeds and seed not in limited_seeds:
+
+    base, mut, seed = normalize_seed_name(seed)
+
+    if base not in seeds and base not in limited_seeds:
         return await interaction.response.send_message("❌ Invalid seed name.", ephemeral=True)
 
     grow_time = time.time() + random.randint(300, 600)
-    user_inventory[user.id]["growing"].append(GrowingSeed(seed, grow_time))
-    await interaction.response.send_message(f"✅ Gave {seed} to {user.mention}")
+    seed_obj = GrowingSeed(base, grow_time)
+    user_inventory[user.id]["growing"].append(seed_obj)
+    await interaction.response.send_message(f"✅ Gave {pretty_seed(seed_obj)} to {user.mention}")
 
 @tree.command(name="give_sheckles")
 @app_commands.describe(user="User to give sheckles to", amount="Amount of sheckles")
@@ -354,52 +356,81 @@ async def give_sheckles(interaction: discord.Interaction, user: discord.Member, 
 @tree.command(name="buy_seed")
 @app_commands.describe(seed="Seed name to purchase")
 async def buy_seed(interaction: discord.Interaction, seed: str):
-    seed = normalize_seed_name(seed)
+    base, mut, seed = normalize_seed_name(seed)  # Normalize input like "ember lily (inferno)"
 
-    # Check if seed exists in stock
-    if seed not in current_stock and seed not in limited_seeds:
+    # Check if seed exists in stock (regular or limited)
+    if base not in current_stock and base not in limited_seeds:
         return await interaction.response.send_message("❌ This seed is not in stock right now!", ephemeral=True)
-    
-    # Check if seed exists in regular shop
-    if seed in seeds:
-        cost, _ = seeds[seed]
+
+    # Check if seed is in regular shop
+    if base in seeds:
+        cost, _ = seeds[base]
         if cost <= 0:
             return await interaction.response.send_message("❌ This seed is not for sale.", ephemeral=True)
-            
+
         if user_sheckles.get(interaction.user.id, 0) < cost:
             return await interaction.response.send_message("❌ Not enough sheckles!", ephemeral=True)
-            
+
         # Deduct sheckles and add seed
         user_sheckles[interaction.user.id] -= cost
         grow_time = time.time() + random.randint(300, 600)
-        user_inventory[interaction.user.id]["growing"].append(GrowingSeed(seed, grow_time))
-        return await interaction.response.send_message(f"✅ Purchased {seed} seed for {cost} sheckles! It will be ready in {int(grow_time - time.time())} seconds.")
-    
-    # Check if seed exists in limited shop
-    elif seed in limited_seeds:
-        seed_data = limited_seeds[seed]
+        seed_obj = GrowingSeed(base, grow_time)
+        user_inventory[interaction.user.id]["growing"].append(seed_obj)
+        return await interaction.response.send_message(
+            f"✅ Purchased {pretty_seed(seed_obj)} seed for {cost} sheckles! It will be ready in {int(grow_time - time.time())} seconds."
+        )
+
+    # Check if seed is in limited shop
+    elif base in limited_seeds:
+        seed_data = limited_seeds[base]
         if time.time() > seed_data["expires"]:
             return await interaction.response.send_message("❌ This limited seed is no longer available.", ephemeral=True)
-            
+
         if user_sheckles.get(interaction.user.id, 0) < seed_data["sheckles"]:
             return await interaction.response.send_message("❌ Not enough sheckles!", ephemeral=True)
-            
-        # Check quest requirement
+
         if seed_data["quest"] > 0 and user_message_counts.get(interaction.user.id, 0) < seed_data["quest"]:
             return await interaction.response.send_message(f"❌ You need to send {seed_data['quest']} messages to unlock this seed!", ephemeral=True)
-            
+
         # Deduct sheckles and add seed
         user_sheckles[interaction.user.id] -= seed_data["sheckles"]
         grow_time = time.time() + random.randint(300, 600)
-        user_inventory[interaction.user.id]["growing"].append(GrowingSeed(seed, grow_time))
-        return await interaction.response.send_message(f"✅ Purchased limited {seed} seed for {seed_data['sheckles']} sheckles! It will be ready in {int(grow_time - time.time())} seconds.")
-    
-    # Seed not found
+        seed_obj = GrowingSeed(base, grow_time)
+        user_inventory[interaction.user.id]["growing"].append(seed_obj)
+        return await interaction.response.send_message(
+            f"✅ Purchased limited {pretty_seed(seed_obj)} seed for {seed_data['sheckles']} sheckles! It will be ready in {int(grow_time - time.time())} seconds."
+        )
+
     else:
         await interaction.response.send_message("❌ Seed not found in shop. Use `/shoplist` to see available seeds.", ephemeral=True)
 
-def normalize_seed_name(name):
-    return ' '.join(word.capitalize() for word in name.split())
+def pretty_seed(seed_obj):
+    return f"{seed_obj.name} ({seed_obj.mutation})" if seed_obj.mutation else seed_obj.name
+
+def normalize_seed_name(raw: str):
+    """
+    Turns 'ember lily (inferno)' → 'Ember Lily (Inferno)'
+    Returns (seed_name, mutation_or_None, combined_string)
+    """
+    raw = raw.strip()
+    m = re.match(r'^(.*?)(?:\((.*?)\))?$', raw)
+    base = ' '.join(word.capitalize() for word in m.group(1).split()).strip()
+    mut  = m.group(2)
+    if mut:
+        mut = ' '.join(word.capitalize() for word in mut.split()).strip()
+        combined = f"{base} ({mut})"
+    else:
+        combined = base
+    return base, mut, combined
+
+def find_matching_seed(seed_list, desired_input):
+    base, mut, _ = normalize_seed_input(desired_input)
+    for s in seed_list:
+        if s.name != base:
+            continue
+        if mut is None or (s.mutation and s.mutation.lower() == mut.lower()):
+            return s
+    return None
 
 @tree.command(name="trade_offer")
 @app_commands.describe(user="User to trade with", yourseed="Seed you're offering", theirseed="Seed you want")
@@ -409,8 +440,8 @@ async def trade_offer(interaction: discord.Interaction, user: discord.Member, yo
 
     sender_id = interaction.user.id
     recipient_id = user.id
-    yourseed = normalize_seed_name(yourseed)
-    theirseed = normalize_seed_name(theirseed)
+    sender_seed_obj = find_matching_seed(user_inventory[sender_id]["grown"], yourseed)
+    recipient_seed_obj = find_matching_seed(user_inventory[recipient_id]["grown"], theirseed)
 
     if recipient_id in trade_offers:
         return await interaction.response.send_message("❌ That user already has a pending trade offer.", ephemeral=True)
@@ -418,17 +449,18 @@ async def trade_offer(interaction: discord.Interaction, user: discord.Member, yo
     sender_seeds = [s.name for s in user_inventory[sender_id]["grown"]]
     recipient_seeds = [s.name for s in user_inventory[recipient_id]["grown"]]
 
-    if yourseed not in sender_seeds:
+    if not sender_seed_obj:
         return await interaction.response.send_message("❌ You don't have that grown seed to offer.", ephemeral=True)
-    if theirseed not in recipient_seeds:
+    if not recipient_seed_obj:
         return await interaction.response.send_message(f"❌ {user.mention} doesn't have that seed or it's still growing.", ephemeral=True)
 
     trade_offers[recipient_id] = {
         "sender_id": sender_id,
-        "sender_seed": yourseed,
-        "recipient_seed": theirseed,
+        "sender_seed": pretty_seed(sender_seed_obj),
+        "recipient_seed": pretty_seed(recipient_seed_obj),
         "timestamp": time.time()
     }
+
 
     await interaction.response.send_message(f"✅ Trade offer sent to {user.mention}.", ephemeral=True)
     try:
@@ -460,18 +492,19 @@ async def trade_accept(interaction: discord.Interaction, user: discord.Member):
     sender_grown = user_inventory[sender_id]["grown"]
     recipient_grown = user_inventory[recipient_id]["grown"]
 
-    sender_seed = next((s for s in sender_grown if s.name == offer["sender_seed"]), None)
-    recipient_seed = next((s for s in recipient_grown if s.name == offer["recipient_seed"]), None)
+    sender_seed = find_matching_seed(sender_grown, offer["sender_seed"])
+    recipient_seed = find_matching_seed(recipient_grown, offer["recipient_seed"])
 
     if not sender_seed or not recipient_seed:
         trade_offers.pop(recipient_id)
         return await interaction.response.send_message("❌ One or both seeds no longer available.", ephemeral=True)
-
+        
     # Perform trade
     sender_grown.remove(sender_seed)
     recipient_grown.remove(recipient_seed)
-    sender_grown.append(GrowingSeed(recipient_seed.name, time.time()))
-    recipient_grown.append(GrowingSeed(sender_seed.name, time.time()))
+    sender_grown.append(recipient_seed)
+    recipient_grown.append(sender_seed)
+    
 
     # Log it
     trade_logs.append({
