@@ -131,32 +131,41 @@ class Giveaway:
         return guess == self.target
 
 class GrowingSeed:
-    def __init__(self, name, finish_time, mutation=None, limited=False):
+    def __init__(self, name, finish_time, mutation=None, limited=False, allowed_mutations=None):
         self.name = name
         self.finish_time = finish_time
-        self.mutation = mutation or self.determine_mutation(name)
         self.limited = limited
-    
-    def determine_mutation(self, plant_name):
-        """Determine if this seed gets a special mutation"""
-        # 1. First check for Ultra-Rare Perfect Carrot or priority (0.1% chance)
+        self.mutation = mutation or self.determine_mutation(name, allowed_mutations)
+
+    def determine_mutation(self, plant_name, allowed_mutations=None):
+        if allowed_mutations is not None:
+            # Only consider allowed mutations (either global or specific to this plant)
+            pool = []
+            for mut in allowed_mutations:
+                if mut in mutations["global"]:
+                    pool.append((mut, mutations["global"][mut]["rarity"]))
+                elif plant_name in mutations["specific"] and mut in mutations["specific"][plant_name]:
+                    pool.append((mut, mutations["specific"][plant_name][mut]["rarity"]))
+
+            for mut, rarity in pool:
+                if random.random() < rarity:
+                    return mut
+            return None
+
+        # Normal mutation logic if no restriction
         if plant_name in mutations["specific"]:
             for mut, data in mutations["specific"][plant_name].items():
                 if data.get("priority", False) and random.random() < data["rarity"]:
                     return mut
-        
-        # 2. Then check other specific mutations (excluding Perfect)
-        if plant_name in mutations["specific"]:
             for mut, data in mutations["specific"][plant_name].items():
                 if mut != "Perfect" and random.random() < data["rarity"]:
                     return mut
-        
-        # 3. Finally check global mutations
+
         for mut, data in mutations["global"].items():
             if random.random() < data["rarity"]:
                 return mut
-        
-        return None  # No mutation
+
+        return None
 
 
 def has_admin_role(member):
@@ -217,23 +226,53 @@ async def end_giveaway(giveaway):
     sheckles="Sheckle cost",
     quest_value="Quest value",
     duration_minutes="How long it's available",
-    mutations="Optional comma-separated list of possible mutations"
+    mutations="Optional comma-separated list of possible mutations (leave blank to allow all)"
 )
-async def add_limited_seed(interaction: discord.Interaction, name: str, sheckles: int, quest_value: int, duration_minutes: int, mutations: str = ""):
+async def add_limited_seed(
+    interaction: discord.Interaction,
+    name: str,
+    sheckles: int,
+    quest_value: int,
+    duration_minutes: int,
+    mutations: str = ""
+):
     if not has_admin_role(interaction.user):
         return await interaction.response.send_message("❌ Not allowed", ephemeral=True)
 
     normalized_name, _, _ = normalize_seed_name(name)
-    mutation_list = [m.strip().title() for m in mutations.split(",") if m.strip()] if mutations else []
 
+    # If mutations is blank, allow all mutations (None = unrestricted)
+    if not mutations.strip():
+        mutation_list = None
+    else:
+        # Parse and validate mutations
+        mutation_list = [m.strip().title() for m in mutations.split(",") if m.strip()]
+        
+        # Get valid mutations
+        valid_mutations = list(mutations_global := mutations["global"].keys())
+        if normalized_name in mutations["specific"]:
+            valid_mutations += mutations["specific"][normalized_name].keys()
+
+        # Check if any are invalid
+        invalid = [m for m in mutation_list if m not in valid_mutations]
+        if invalid:
+            return await interaction.response.send_message(
+                f"❌ Invalid mutation(s): {', '.join(invalid)}", ephemeral=True
+            )
+
+    # Save to limited_seeds
     limited_seeds[normalized_name] = {
         "sheckles": sheckles,
         "quest": quest_value,
         "expires": time.time() + (duration_minutes * 60),
-        "mutations": mutation_list
+        "mutations": mutation_list  # None = allow all, list = restricted
     }
 
-    await interaction.response.send_message(f"✅ Limited seed **{normalized_name}** added. Available for {duration_minutes} minutes.")
+    mut_display = "All mutations allowed" if mutation_list is None else ", ".join(mutation_list)
+    await interaction.response.send_message(
+        f"✅ Limited seed **{normalized_name}** added for {duration_minutes} minutes.\n"
+        f"🔁 Mutations: {mut_display}"
+    )
 
 async def start_giveaway(interaction: discord.Interaction, winners: int, prize: str, number_range: str, hoster: discord.Member, duration: int = 0, target: Optional[int] = None):
     await interaction.response.defer()
@@ -372,20 +411,22 @@ async def buy_seed(interaction: discord.Interaction, seed: str):
 
     # Check if seed is in regular shop
     if base in seeds:
-        cost, _ = seeds[base]
-        if cost <= 0:
+        sheckles_required, _ = seeds[base]
+        if sheckles_required <= 0:
             return await interaction.response.send_message("❌ This seed is not for sale.", ephemeral=True)
 
-        if user_sheckles.get(interaction.user.id, 0) < cost:
+        if user_sheckles.get(interaction.user.id, 0) < sheckles_required:
             return await interaction.response.send_message("❌ Not enough sheckles!", ephemeral=True)
 
         # Deduct sheckles and add seed
-        user_sheckles[interaction.user.id] -= cost
+        user_sheckles[interaction.user.id] -= sheckles_required
         grow_time = time.time() + random.randint(300, 600)
         seed_obj = GrowingSeed(base, grow_time)
         user_inventory[interaction.user.id]["growing"].append(seed_obj)
+
         return await interaction.response.send_message(
-            f"✅ Purchased {pretty_seed(seed_obj)} seed for {cost} sheckles! It will be ready in {int(grow_time - time.time())} seconds."
+            f"✅ Purchased {pretty_seed(seed_obj)} seed for {sheckles_required} sheckles! "
+            f"It will be ready in {int(grow_time - time.time())} seconds."
         )
 
     # Check if seed is in limited shop
@@ -394,23 +435,32 @@ async def buy_seed(interaction: discord.Interaction, seed: str):
         if time.time() > seed_data["expires"]:
             return await interaction.response.send_message("❌ This limited seed is no longer available.", ephemeral=True)
 
-        if user_sheckles.get(interaction.user.id, 0) < seed_data["sheckles"]:
+        sheckles_required = seed_data["sheckles"]
+        if user_sheckles.get(interaction.user.id, 0) < sheckles_required:
             return await interaction.response.send_message("❌ Not enough sheckles!", ephemeral=True)
 
         if seed_data["quest"] > 0 and user_message_counts.get(interaction.user.id, 0) < seed_data["quest"]:
-            return await interaction.response.send_message(f"❌ You need to send {seed_data['quest']} messages to unlock this seed!", ephemeral=True)
+            return await interaction.response.send_message(
+                f"❌ You need to send {seed_data['quest']} messages to unlock this seed!", ephemeral=True
+            )
 
-        # Deduct sheckles and add seed
-        user_sheckles[interaction.user.id] -= seed_data["sheckles"]
+        # Deduct sheckles and add seed (mark as limited)
+        user_sheckles[interaction.user.id] -= sheckles_required
         grow_time = time.time() + random.randint(300, 600)
-        seed_obj = GrowingSeed(base, grow_time)
+        allowed_mutations = seed_data.get("mutations", [])
+
+        seed_obj = GrowingSeed(base, grow_time, limited=True, allowed_mutations=allowed_mutations)
         user_inventory[interaction.user.id]["growing"].append(seed_obj)
+
         return await interaction.response.send_message(
-            f"✅ Purchased limited {pretty_seed(seed_obj)} seed for {seed_data['sheckles']} sheckles! It will be ready in {int(grow_time - time.time())} seconds."
+            f"✅ Purchased limited {pretty_seed(seed_obj)} seed for {sheckles_required} sheckles! "
+            f"It will be ready in {int(grow_time - time.time())} seconds."
         )
 
     else:
-        await interaction.response.send_message("❌ Seed not found in shop. Use `/shoplist` to see available seeds.", ephemeral=True)
+        await interaction.response.send_message(
+            "❌ Seed not found in shop. Use `/shoplist` to see available seeds.", ephemeral=True
+        )
 
 def pretty_seed(seed_obj):
     name = f"{seed_obj.name}"
