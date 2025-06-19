@@ -705,7 +705,7 @@ async def shoplist(interaction: discord.Interaction):
     if active_limited:
         limited_display = []
         for name, data in active_limited:
-            time_left = max(0, int((data["expires"] - time.time()) // 60)
+            time_left = max(0, int((data["expires"] - time.time()) // 60))
             muts = "All mutations" if data.get("mutations") is None else ", ".join(data["mutations"])
             limited_display.append(
                 f"**{name}**\n"
