@@ -27,7 +27,7 @@ user_message_counts = defaultdict(int)
 user_inventory = defaultdict(lambda: {"growing": [], "grown": []})
 user_sheckles = defaultdict(int)
 seeds = {
-    "Carrot": (0, 250),
+    "Carrot": (2, 250),
     "Strawberry": (10, 50), # (Sheckles, Messages For quest)
     "Potato": (5, 0),
     "Bamboo": (20, 300),
@@ -504,7 +504,7 @@ async def sell_seed(interaction: discord.Interaction, seed: str, seed_type: app_
     
     # Base prices (even for free seeds like Carrot)
     base_prices = {
-        "Carrot": 5,
+        "Carrot": 2,
         "Strawberry": 10,
         "Potato": 5,
         "Bamboo": 20,
