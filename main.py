@@ -673,6 +673,12 @@ async def trade_logs_command(interaction: discord.Interaction):
 async def shoplist(interaction: discord.Interaction):
     embed = discord.Embed(title="🛒 Seed Shop", color=discord.Color.purple())
     
+    global limited_seeds
+    limited_seeds = {
+        name: data for name, data in limited_seeds.items() 
+        if time.time() < data["expires"]
+    }
+    
     # Add regular stock
     if current_stock:
         embed.add_field(name="🔹 Regular Stock", value="─────────────", inline=False)
@@ -796,7 +802,14 @@ def update_growing_seeds(user_id):
 
 @tasks.loop(minutes=5)
 async def refresh_stock():
-    global current_stock
+    global current_stock, limited_seeds  # Add this line
+    
+    # Auto-purge expired limited seeds
+    limited_seeds = {
+        name: data for name, data in limited_seeds.items() 
+        if time.time() < data["expires"]
+    }
+
     current_stock = []
 
     # First pass: randomly add seeds based on rarity chance
