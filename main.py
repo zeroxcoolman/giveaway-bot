@@ -552,8 +552,12 @@ async def view_trade_offers(interaction: discord.Interaction):
     msg = (
         f"🔁 Pending Trade:\n"
         f"From: {sender.mention}\n"
-        f"They offer: {offer['sender_seed']}\n"
-        f"They want: {offer['recipient_seed']}\n"
+        from_seed = f"{offer['sender_seed_name']} ({offer['sender_seed_mut']})" if offer['sender_seed_mut'] else offer['sender_seed_name']
+        to_seed = f"{offer['recipient_seed_name']} ({offer['recipient_seed_mut']})" if offer['recipient_seed_mut'] else offer['recipient_seed_name']
+
+        f"They offer: {from_seed}\n"
+        f"They want: {to_seed}\n"
+
         f"Use `/trade_accept @{sender.name}` or `/trade_decline @{sender.name}`"
     )
     await interaction.response.send_message(msg, ephemeral=True)
