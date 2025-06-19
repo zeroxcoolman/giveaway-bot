@@ -504,8 +504,8 @@ async def view_trade_offers(interaction: discord.Interaction):
         return await interaction.response.send_message("📭 You have no pending trade offers.", ephemeral=True)
     sender = await bot.fetch_user(offer["sender_id"])
     msg = (
-        f"🔁 Pending Trade:
-"
+        f"🔁 Pending Trade:"
+        
         f"From: {sender.mention}\n"
         f"They offer: {offer['sender_seed']}\n"
         f"They want: {offer['recipient_seed']}\n"
