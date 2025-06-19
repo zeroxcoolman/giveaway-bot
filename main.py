@@ -36,6 +36,26 @@ seeds = {
     "Beanstalk": (70, 750),
 }
 
+SEED_RARITIES = {
+    "Carrot": "Uncommon",
+    "Strawberry": "Common",
+    "Potato": "Common",
+    "Bamboo": "Rare",
+    "Ember Lily": "Mythical",
+    "Sugar Apple": "Legendary",
+    "Beanstalk": "Legendary",
+}
+
+RARITY_CHANCES = {
+    "Common": 0.9,
+    "Uncommon": 0.6,
+    "Rare": 0.35,
+    "Mythical": 0.1,
+    "Legendary": 0.05,
+}
+
+current_stock = []
+
 mutations = {
     "global": {
         "Giant": {
@@ -159,6 +179,7 @@ def update_growing_seeds(user_id):
 @bot.event
 async def on_ready():
     print(f"Logged in as {bot.user} (ID: {bot.user.id})")
+    refresh_stock.start()
     try:
         print("Syncing commands...")
         synced = await tree.sync()
@@ -328,6 +349,10 @@ async def give_sheckles(interaction: discord.Interaction, user: discord.Member, 
 @app_commands.describe(seed="Seed name to purchase")
 async def buy_seed(interaction: discord.Interaction, seed: str):
     seed = seed.capitalize()
+
+    # Check if seed exists in stock
+    if seed not in current_stock and seed not in limited_seeds:
+        return await interaction.response.send_message("❌ This seed is not in stock right now!", ephemeral=True)
     
     # Check if seed exists in regular shop
     if seed in seeds:
@@ -455,27 +480,14 @@ async def trade_decline(interaction: discord.Interaction):
 
 @tree.command(name="shoplist")
 async def shoplist(interaction: discord.Interaction):
-    # Regular shop items
-    shop_items = [f"{name} - {cost} sheckles" for name, (cost, quest) in seeds.items() if cost > 0]
-    
-    # Limited time shop items
-    current_time = time.time()
-    limited_items = []
-    for name, data in limited_seeds.items():
-        if current_time < data["expires"]:
-            quest_req = f" (Requires {data['quest']} messages)" if data["quest"] > 0 else ""
-            limited_items.append(f"{name} - {data['sheckles']} sheckles{quest_req} (Limited time!)")
-    
-    if not shop_items and not limited_items:
-        await interaction.response.send_message("🛒 No seeds available for purchase right now.")
-        return
-    
-    embed = discord.Embed(title="🛒 Seed Shop List", color=discord.Color.blue())
-    if shop_items:
-        embed.add_field(name="Regular Seeds", value="\n".join(shop_items) or "None", inline=False)
-    if limited_items:
-        embed.add_field(name="Limited Time Seeds", value="\n".join(limited_items) or "None", inline=False)
-    
+    embed = discord.Embed(title="🛒 Seed Stock (Rotating)", color=discord.Color.purple())
+    if current_stock:
+        for seed in current_stock:
+            cost, _ = seeds[seed]
+            rarity = SEED_RARITIES.get(seed, "Unknown")
+            embed.add_field(name=seed, value=f"{cost} sheckles\nRarity: {rarity}", inline=False)
+    else:
+        embed.description = "No seeds in stock right now. Check back later!"
     await interaction.response.send_message(embed=embed)
 
 @tree.command(name="sell_seed")
@@ -556,6 +568,36 @@ def update_growing_seeds(user_id):
     
     # Remove them from growing
     user_inventory[user_id]["growing"] = [seed for seed in growing if seed.finish_time > current_time]
+
+@tasks.loop(minutes=5)
+async def refresh_stock():
+    global current_stock
+    current_stock = []
+
+    # First pass: randomly add seeds based on rarity chance
+    for seed, rarity in SEED_RARITIES.items():
+        if random.random() < RARITY_CHANCES[rarity]:
+            current_stock.append(seed)
+
+    # Ensure at least 2 common seeds are always present
+    commons = [s for s, r in SEED_RARITIES.items() if r == "Common"]
+    commons_in_stock = [s for s in current_stock if s in commons]
+    needed = max(2 - len(commons_in_stock), 0)
+
+    if needed > 0:
+        available_commons = list(set(commons) - set(commons_in_stock))
+        random.shuffle(available_commons)
+        current_stock += available_commons[:needed]
+
+    # Optional: shuffle stock list
+    random.shuffle(current_stock)
+
+@tree.command(name="refresh_stock")
+async def manual_refresh(interaction: discord.Interaction):
+    if not has_admin_role(interaction.user):
+        return await interaction.response.send_message("❌ Not allowed", ephemeral=True)
+    refresh_stock.restart()
+    await interaction.response.send_message("🔁 Stock refreshed!", ephemeral=True)
 
 @bot.event
 async def on_message(message):
