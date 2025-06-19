@@ -108,6 +108,7 @@ mutations = {
 limited_seeds = {}
 
 trade_offers = {}  # user_id -> dict with keys: sender_id, seed_name, timestamp
+trade_logs = []
 
 class Giveaway:
     def __init__(self, hoster, prize, winners, number_range, target, duration, channel):
@@ -393,90 +394,143 @@ async def buy_seed(interaction: discord.Interaction, seed: str):
         await interaction.response.send_message("❌ Seed not found in shop. Use `/shoplist` to see available seeds.", ephemeral=True)
 
 @tree.command(name="trade_offer")
-@app_commands.describe(user="User to offer trade to", seed="Seed name to trade")
-async def trade_offer(interaction: discord.Interaction, user: discord.Member, seed: str):
-    # First update the inventory to move finished seeds
+@app_commands.describe(user="User to trade with", yourseed="Seed you're offering", theirseed="Seed you want")
+async def trade_offer(interaction: discord.Interaction, user: discord.Member, yourseed: str, theirseed: str):
     update_growing_seeds(interaction.user.id)
-    
+    update_growing_seeds(user.id)
+
     sender_id = interaction.user.id
     recipient_id = user.id
-    seed = seed.capitalize()
-    sender_inventory = user_inventory[sender_id]["grown"]
+    yourseed = yourseed.capitalize()
+    theirseed = theirseed.capitalize()
 
-    # Check sender owns the seed
-    for grown_seed in sender_inventory:
-        if grown_seed.name.lower() == seed.lower():
-            # Check if recipient already has a pending trade
-            if recipient_id in trade_offers:
-                return await interaction.response.send_message("❌ That user already has a pending trade offer.", ephemeral=True)
-            # Store the offer with a timestamp
-            trade_offers[recipient_id] = {
-                "sender_id": sender_id,
-                "seed_name": seed,
-                "timestamp": time.time()
-            }
-            await interaction.response.send_message(f"✅ Trade offer sent to {user.mention} for seed {seed}. They can `/trade_accept` or `/trade_decline` within 5 minutes.")
-            try:
-                await user.send(f"🔔 You have received a trade offer from {interaction.user.mention} for a **{seed}** seed.\n"
-                                f"Run `/trade_accept` to accept or `/trade_decline` to decline. Offer expires in 5 minutes.")
-            except:
-                # Could not DM user, but offer still stands
-                pass
-            return
+    if recipient_id in trade_offers:
+        return await interaction.response.send_message("❌ That user already has a pending trade offer.", ephemeral=True)
 
-    await interaction.response.send_message("❌ You don't have that grown seed to offer.", ephemeral=True)
+    sender_seeds = [s.name for s in user_inventory[sender_id]["grown"]]
+    recipient_seeds = [s.name for s in user_inventory[recipient_id]["grown"]]
+
+    if yourseed not in sender_seeds:
+        return await interaction.response.send_message("❌ You don't have that grown seed to offer.", ephemeral=True)
+    if theirseed not in recipient_seeds:
+        return await interaction.response.send_message(f"❌ {user.mention} doesn't have that seed or it's still growing.", ephemeral=True)
+
+    trade_offers[recipient_id] = {
+        "sender_id": sender_id,
+        "sender_seed": yourseed,
+        "recipient_seed": theirseed,
+        "timestamp": time.time()
+    }
+
+    await interaction.response.send_message(f"✅ Trade offer sent to {user.mention}.", ephemeral=True)
+    try:
+        await user.send(f"🔔 You received a trade offer from {interaction.user.mention}:")
+        await user.send(f"They offer **{yourseed}** for your **{theirseed}**.")
+        await user.send("Use `/trade_accept @user` or `/trade_decline @user`.")
+    except:
+        pass
 
 @tree.command(name="trade_accept")
-async def trade_accept(interaction: discord.Interaction):
-    # First update the inventory to move finished seeds
+@app_commands.describe(user="User who sent the trade offer")
+async def trade_accept(interaction: discord.Interaction, user: discord.Member):
     update_growing_seeds(interaction.user.id)
-    
+    update_growing_seeds(user.id)
+
     recipient_id = interaction.user.id
+    sender_id = user.id
+
     offer = trade_offers.get(recipient_id)
-    if not offer:
-        return await interaction.response.send_message("❌ You have no pending trade offers.", ephemeral=True)
+    if not offer or offer["sender_id"] != sender_id:
+        return await interaction.response.send_message("❌ No trade offer from that user.", ephemeral=True)
 
-    sender_id = offer["sender_id"]
-    seed = offer["seed_name"]
-
-    # Check offer expiration (5 minutes)
+    # Check expiration
     if time.time() - offer["timestamp"] > 300:
         trade_offers.pop(recipient_id)
         return await interaction.response.send_message("❌ Trade offer expired.", ephemeral=True)
 
-    sender_inventory = user_inventory[sender_id]["grown"]
+    # Validate ownership
+    sender_grown = user_inventory[sender_id]["grown"]
+    recipient_grown = user_inventory[recipient_id]["grown"]
 
-    # Check sender still has the seed
-    for i, grown_seed in enumerate(sender_inventory):
-        if grown_seed.name.lower() == seed.lower():
-            # Remove from sender and add to recipient
-            sender_inventory.pop(i)
-            user_inventory[recipient_id]["grown"].append(GrowingSeed(seed, time.time()))
-            trade_offers.pop(recipient_id)
-            await interaction.response.send_message(f"✅ Trade accepted! You received a {seed} seed from <@{sender_id}>.")
-            try:
-                sender = await bot.fetch_user(sender_id)
-                await sender.send(f"✅ Your trade offer of {seed} to {interaction.user.mention} was accepted.")
-            except:
-                pass
-            return
+    sender_seed = next((s for s in sender_grown if s.name == offer["sender_seed"]), None)
+    recipient_seed = next((s for s in recipient_grown if s.name == offer["recipient_seed"]), None)
 
-    # If sender no longer has the seed
+    if not sender_seed or not recipient_seed:
+        trade_offers.pop(recipient_id)
+        return await interaction.response.send_message("❌ One or both seeds no longer available.", ephemeral=True)
+
+    # Perform trade
+    sender_grown.remove(sender_seed)
+    recipient_grown.remove(recipient_seed)
+    sender_grown.append(GrowingSeed(recipient_seed.name, time.time()))
+    recipient_grown.append(GrowingSeed(sender_seed.name, time.time()))
+
+    # Log it
+    trade_logs.append({
+        "from": sender_id,
+        "to": recipient_id,
+        "gave": sender_seed.name,
+        "got": recipient_seed.name,
+        "time": time.time()
+    })
     trade_offers.pop(recipient_id)
-    await interaction.response.send_message("❌ The sender no longer has the seed to trade.", ephemeral=True)
 
-@tree.command(name="trade_decline")
-async def trade_decline(interaction: discord.Interaction):
-    recipient_id = interaction.user.id
-    offer = trade_offers.pop(recipient_id, None)
-    if not offer:
-        return await interaction.response.send_message("❌ You have no pending trade offers.", ephemeral=True)
+    await interaction.response.send_message(f"✅ Trade complete! You received {sender_seed.name} and gave {recipient_seed.name}.")
     try:
-        sender = await bot.fetch_user(offer["sender_id"])
-        await sender.send(f"❌ Your trade offer for {offer['seed_name']} was declined by {interaction.user.mention}.")
+        sender_user = await bot.fetch_user(sender_id)
+        await sender_user.send(f"✅ Your trade with {interaction.user.mention} completed! You got {recipient_seed.name} and gave {sender_seed.name}.")
     except:
         pass
-    await interaction.response.send_message("❌ Trade offer declined.", ephemeral=True)
+
+@tree.command(name="trade_decline")
+@app_commands.describe(user="User who sent the trade offer")
+async def trade_decline(interaction: discord.Interaction, user: discord.Member):
+    recipient_id = interaction.user.id
+    offer = trade_offers.get(recipient_id)
+    if not offer or offer["sender_id"] != user.id:
+        return await interaction.response.send_message("❌ No trade offer from that user.", ephemeral=True)
+    trade_offers.pop(recipient_id)
+    await interaction.response.send_message("❌ Trade offer declined.")
+    try:
+        sender_user = await bot.fetch_user(user.id)
+        await sender_user.send(f"❌ Your trade was declined by {interaction.user.mention}.")
+    except:
+        pass
+
+@tree.command(name="trade_offers")
+async def view_trade_offers(interaction: discord.Interaction):
+    offer = trade_offers.get(interaction.user.id)
+    if not offer:
+        return await interaction.response.send_message("📭 You have no pending trade offers.", ephemeral=True)
+    sender = await bot.fetch_user(offer["sender_id"])
+    msg = (
+        f"🔁 Pending Trade:
+"
+        f"From: {sender.mention}\n"
+        f"They offer: {offer['sender_seed']}\n"
+        f"They want: {offer['recipient_seed']}\n"
+        f"Use `/trade_accept @{sender.name}` or `/trade_decline @{sender.name}`"
+    )
+    await interaction.response.send_message(msg, ephemeral=True)
+
+@tree.command(name="trade_logs")
+async def trade_logs_command(interaction: discord.Interaction):
+    if not has_admin_role(interaction.user):
+        return await interaction.response.send_message("❌ Admins only.", ephemeral=True)
+    if not trade_logs:
+        return await interaction.response.send_message("📭 No trade logs available.", ephemeral=True)
+
+    embed = discord.Embed(title="📜 Recent Trade Logs", color=discord.Color.gold())
+    for log in trade_logs[-10:][::-1]:
+        from_user = await bot.fetch_user(log["from"])
+        to_user = await bot.fetch_user(log["to"])
+        timestamp = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(log["time"]))
+        embed.add_field(
+            name=f"{from_user.name} ➝ {to_user.name} @ {timestamp}",
+            value=f"{from_user.name} gave {log['gave']}, got {log['got']}",
+            inline=False
+        )
+    await interaction.response.send_message(embed=embed, ephemeral=True)
 
 @tree.command(name="shoplist")
 async def shoplist(interaction: discord.Interaction):
