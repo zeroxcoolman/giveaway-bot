@@ -334,6 +334,11 @@ async def closest_quest(interaction: discord.Interaction):
 async def give_seed(interaction: discord.Interaction, user: discord.Member, seed: str):
     if not has_admin_role(interaction.user):
         return await interaction.response.send_message("❌ Not allowed", ephemeral=True)
+    
+    seed = normalize_seed_name(seed)
+    if seed not in seeds and seed not in limited_seeds:
+        return await interaction.response.send_message("❌ Invalid seed name.", ephemeral=True)
+
     grow_time = time.time() + random.randint(300, 600)
     user_inventory[user.id]["growing"].append(GrowingSeed(seed, grow_time))
     await interaction.response.send_message(f"✅ Gave {seed} to {user.mention}")
@@ -349,7 +354,7 @@ async def give_sheckles(interaction: discord.Interaction, user: discord.Member, 
 @tree.command(name="buy_seed")
 @app_commands.describe(seed="Seed name to purchase")
 async def buy_seed(interaction: discord.Interaction, seed: str):
-    seed = seed.capitalize()
+    seed = normalize_seed_name(seed)
 
     # Check if seed exists in stock
     if seed not in current_stock and seed not in limited_seeds:
