@@ -674,10 +674,11 @@ async def shoplist(interaction: discord.Interaction):
 async def sell_seed(interaction: discord.Interaction, seed: str, seed_type: app_commands.Choice[str]):
     update_growing_seeds(interaction.user.id)
     
-    seed = seed.capitalize()
+    # Normalize input (handles "test (limited)" -> "Test (Limited)")
+    base, mut, _ = normalize_seed_name(seed)
     inv = user_inventory[interaction.user.id]
     
-    # Base prices (even for free seeds like Carrot)
+    # Dynamic base prices (combine regular + limited seeds)
     base_prices = {
         "Carrot": 2,
         "Strawberry": 10,
@@ -685,30 +686,35 @@ async def sell_seed(interaction: discord.Interaction, seed: str, seed_type: app_
         "Bamboo": 20,
         "Ember Lily": 55,
         "Sugar Apple": 80,
-        "Beanstalk": 70
+        "Beanstalk": 70,
     }
+    
+    # Add active limited seeds to pricing
+    for seed_name, data in limited_seeds.items():
+        if time.time() < data["expires"]:  # Only if not expired
+            base_prices[seed_name] = data["sheckles"]  # Use limited seed's sheckle cost as base
     
     # Find seed in inventory
     seed_list = []
     if seed_type.value == "growing":
-        seed_list = [s for s in inv["growing"] if s.name == seed]
+        seed_list = [s for s in inv["growing"] if s.name.lower() == base.lower()]
     else:
-        seed_list = [s for s in inv["grown"] if s.name == seed]
+        seed_list = [s for s in inv["grown"] if s.name.lower() == base.lower()]
     
-    if not seed_list or seed not in base_prices:
+    if not seed_list or base not in base_prices:
         return await interaction.response.send_message("❌ Invalid seed or type", ephemeral=True)
     
     # Calculate price with mutation
-    base = base_prices[seed]
+    base_price = base_prices[base]
     mult = 1.0
     if seed_list[0].mutation:
         mut = seed_list[0].mutation
-        if seed in mutations["specific"] and mut in mutations["specific"][seed]:
-            mult = mutations["specific"][seed][mut]["multiplier"]
+        if base in mutations["specific"] and mut in mutations["specific"][base]:
+            mult = mutations["specific"][base][mut]["multiplier"]
         elif mut in mutations["global"]:
             mult = mutations["global"][mut]["multiplier"]
     
-    price = int(base * mult)
+    price = int(base_price * mult)
     if seed_type.value == "growing":
         price = price // 2  # Half price for growing
     
@@ -720,9 +726,11 @@ async def sell_seed(interaction: discord.Interaction, seed: str, seed_type: app_
     
     user_sheckles[interaction.user.id] += price
     
-    msg = f"✅ Sold {seed}"
+    msg = f"✅ Sold {seed_list[0].name}"
     if seed_list[0].mutation:
         msg += f" ({seed_list[0].mutation})"
+    if getattr(seed_list[0], "limited", False):
+        msg += " 🌟(Limited)"
     msg += f" for {price} sheckles!"
     
     await interaction.response.send_message(msg, ephemeral=True)
