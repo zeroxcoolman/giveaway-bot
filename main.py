@@ -699,7 +699,7 @@ async def shoplist(interaction: discord.Interaction):
     if active_limited:
         embed.add_field(name="🌟 Limited-Time Seeds", value="─────────────", inline=False)
         for name, data in active_limited:
-            time_left = max(0, int((data["expires"] - time.time()) // 60)  # Minutes left
+            time_left = max(0, int((data["expires"] - time.time()) // 60))  # Minutes left
             muts = "All mutations" if data.get("mutations") is None else ", ".join(data["mutations"])
             embed.add_field(
                 name=name,
