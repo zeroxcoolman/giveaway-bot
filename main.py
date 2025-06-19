@@ -704,6 +704,27 @@ async def manual_refresh(interaction: discord.Interaction):
     refresh_stock.restart()
     await interaction.response.send_message("🔁 Stock refreshed!", ephemeral=True)
 
+@tree.command(name="growinstant")
+@app_commands.describe(user="User whose plant to instantly grow", plant="Plant name, e.g. 'Carrot' or 'Ember Lily (Inferno)'")
+async def growinstant(interaction: discord.Interaction, user: discord.Member, plant: str):
+    if not has_admin_role(interaction.user):
+        return await interaction.response.send_message("❌ Not allowed", ephemeral=True)
+
+    base, mut, _ = normalize_seed_name(plant)
+    update_growing_seeds(user.id)
+
+    growing = user_inventory[user.id]["growing"]
+    match = next((s for s in growing if s.name == base and (mut is None or s.mutation == mut)), None)
+
+    if not match:
+        return await interaction.response.send_message(f"❌ No matching growing seed found for {user.mention}.", ephemeral=True)
+
+    # Move seed to grown instantly
+    growing.remove(match)
+    user_inventory[user.id]["grown"].append(match)
+
+    await interaction.response.send_message(f"🌱 Instantly grew {pretty_seed(match)} for {user.mention}.", ephemeral=True)
+
 @bot.event
 async def on_message(message):
     if message.author.bot:
