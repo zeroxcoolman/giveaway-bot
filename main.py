@@ -331,23 +331,28 @@ async def inventory(interaction: discord.Interaction):
     
     inv = user_inventory[interaction.user.id]
     
-    # Format grown seeds with mutations
+    # Format grown seeds with mutations and limited status
     grown_list = []
     for seed in inv["grown"]:
+        seed_display = seed.name
         if seed.mutation:
-            grown_list.append(f"{seed.name} ✨({seed.mutation})")
-        else:
-            grown_list.append(seed.name)
+            seed_display += f" ✨({seed.mutation})"
+        if getattr(seed, "limited", False):
+            seed_display += " 🌟(Limited)"
+        grown_list.append(seed_display)
     grown = ', '.join(grown_list) or 'None'
     
-    # Format growing seeds with mutations and time remaining
+    # Format growing seeds with mutations, limited status, and time remaining
     growing_list = []
     for seed in inv["growing"]:
         time_left = int(seed.finish_time - time.time())
+        seed_display = seed.name
         if seed.mutation:
-            growing_list.append(f"{seed.name} ✨({seed.mutation}) [{time_left}s]")
-        else:
-            growing_list.append(f"{seed.name} [{time_left}s]")
+            seed_display += f" ✨({seed.mutation})"
+        if getattr(seed, "limited", False):
+            seed_display += " 🌟(Limited)"
+        seed_display += f" [{time_left}s]"
+        growing_list.append(seed_display)
     growing = ', '.join(growing_list) or 'None'
     
     sheckles = user_sheckles.get(interaction.user.id, 0)
@@ -655,14 +660,40 @@ async def trade_logs_command(interaction: discord.Interaction):
 
 @tree.command(name="shoplist")
 async def shoplist(interaction: discord.Interaction):
-    embed = discord.Embed(title="🛒 Seed Stock (Rotating)", color=discord.Color.purple())
+    embed = discord.Embed(title="🛒 Seed Shop", color=discord.Color.purple())
+    
+    # Add regular stock
     if current_stock:
+        embed.add_field(name="🔹 Regular Stock", value="─────────────", inline=False)
         for seed in current_stock:
             cost, _ = seeds[seed]
             rarity = SEED_RARITIES.get(seed, "Unknown")
-            embed.add_field(name=seed, value=f"{cost} sheckles\nRarity: {rarity}", inline=False)
-    else:
-        embed.description = "No seeds in stock right now. Check back later!"
+            embed.add_field(name=seed, value=f"{cost} sheckles\nRarity: {rarity}", inline=True)
+    
+    # Add active limited seeds
+    active_limited = []
+    for seed_name, data in limited_seeds.items():
+        if time.time() < data["expires"]:
+            active_limited.append(seed_name)
+    
+    if active_limited:
+        embed.add_field(name="🌟 Limited-Time Seeds", value="─────────────", inline=False)
+        for seed in active_limited:
+            data = limited_seeds[seed]
+            mut_display = "All mutations" if data["mutations"] is None else ", ".join(data["mutations"])
+            time_left = int((data["expires"] - time.time()) // 60  # Minutes remaining
+            
+            value = (
+                f"{data['sheckles']} sheckles\n"
+                f"Quest: {data['quest']} messages\n"
+                f"Mutations: {mut_display}\n"
+                f"⏳ {time_left} minutes left"
+            )
+            embed.add_field(name=seed, value=value, inline=True)
+    
+    if not current_stock and not active_limited:
+        embed.description = "No seeds available right now. Check back later!"
+    
     await interaction.response.send_message(embed=embed)
 
 @tree.command(name="sell_seed")
