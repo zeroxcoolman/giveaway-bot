@@ -26,6 +26,69 @@ active_giveaways = {}
 user_message_counts = defaultdict(int)
 user_inventory = defaultdict(lambda: {"growing": [], "grown": []})
 user_sheckles = defaultdict(int)
+user_achievements = defaultdict(list)  # user_id -> list of achievement names
+current_plant_event = None
+user_fertilizers = defaultdict(lambda: defaultdict(int))  # user_id -> {fertilizer_name: count}
+user_active_boosts = defaultdict(dict)  # user_id -> {boost_type: {expires: timestamp, multiplier: float}}
+
+fertilizers = {
+    "Growth Boost": {
+        "cost": 50,
+        "description": "Makes plants grow 25% faster for 1 hour",
+        "effect": {"type": "growth", "multiplier": 0.75, "duration": 3600}
+    },
+    "Mutation Boost": {
+        "cost": 100,
+        "description": "Doubles mutation chances for 1 hour",
+        "effect": {"type": "mutation", "multiplier": 2.0, "duration": 3600}
+    }
+}
+
+
+PLANT_EVENTS = [
+    {
+        "name": "Solar Eclipse",
+        "effect": "delay",
+        "delay": 300,  # +5 minutes to all grow times
+        "duration": 3600  # 1 hour
+    },
+    {
+        "name": "Fertile Ground",
+        "effect": "speed",
+        "multiplier": 0.7,  # 30% faster
+        "duration": 7200  # 2 hours
+    }
+]
+
+achievement_definitions = {
+    "First Seed": {
+        "condition": lambda uid: len(user_inventory[uid]["grown"]) > 0,
+        "description": "Grow your first plant"
+    },
+    "Mutation Master": {
+        "condition": lambda uid: any(s.mutation for s in user_inventory[uid]["grown"]),
+        "description": "Grow a mutated plant"
+    },
+    "Legendary Gardener": {
+        "condition": lambda uid: any(s.name in ["Sugar Apple", "Beanstalk"] for s in user_inventory[uid]["grown"]),
+        "description": "Grow a legendary plant"
+    },
+    # Add more achievements as needed
+}
+
+current_season = {
+    "name": "Spring",
+    "boosted_seeds": ["Carrot", "Strawberry"],
+    "multiplier": 1.0
+}
+
+SEASONS = [
+    {"name": "Spring", "boosted_seeds": ["Carrot", "Strawberry"]},
+    {"name": "Summer", "boosted_seeds": ["Ember Lily", "Bamboo"]},
+    {"name": "Fall", "boosted_seeds": ["Potato", "Sugar Apple"]},
+    {"name": "Winter", "boosted_seeds": ["Beanstalk"]}
+]
+
 seeds = {
     "Carrot": (2, 250),
     "Strawberry": (10, 50), # (Sheckles, Messages For quest)
@@ -168,21 +231,38 @@ class GrowingSeed:
         return None
 
 def calculate_grow_time(base_seed):
-    """Calculate grow time with season and event modifiers"""
-    grow_time = calculate_grow_time(base)
+    """Calculate grow time with all modifiers"""
+    # Base grow times (in seconds) - need to be defined
+    BASE_GROW_TIMES = {
+        "Carrot": 300,      # 5 minutes
+        "Strawberry": 300,  # 5 minutes
+        "Potato": 300,      # 5 minutes
+        "Bamboo": 300,      # 15 minutes
+        "Ember Lily": 300,  # 5 minutes
+        "Sugar Apple": 300, # 5 minutes
+        "Beanstalk": 300   # 5 minutes
+    }
+    
+    grow_time = BASE_GROW_TIMES.get(base_seed, 300)  # Default to 5 minutes
     
     # Season boost
     if base_seed in current_season["boosted_seeds"]:
         grow_time *= 0.8  # 20% faster
     
-    # Plant event
+    # Plant event modifier
     if current_plant_event:
         if current_plant_event["effect"] == "delay":
             grow_time += current_plant_event["delay"]
         elif current_plant_event["effect"] == "speed":
             grow_time *= current_plant_event["multiplier"]
     
-    return grow_time
+    # Fertilizer effects (would check user's active boosts)
+    if user_active_boosts.get(user_id, {}).get("growth_boost"):
+        boost = user_active_boosts[user_id]["growth_boost"]
+        if time.time() < boost["expires"]:
+            grow_time *= boost["multiplier"]
+    
+    return max(30, grow_time)  # Ensure minimum 30 second grow time
 
 def check_achievements(user_id):
     """Check for new achievement unlocks"""
@@ -211,6 +291,7 @@ def update_growing_seeds(user_id):
     
     # Remove them from growing
     user_inventory[user_id]["growing"] = [seed for seed in growing if seed.finish_time > current_time]
+
 
 @bot.event
 async def on_ready():
@@ -790,15 +871,17 @@ async def shoplist(interaction: discord.Interaction):
         )
 
     # Fertilizers
-    fert_display = []
-    for name, data in fertilizers.items():
-        fert_display.append(f"**{name}** - {data['cost']} sheckles\n{data['description']}")
+    # In shoplist command, add this section:
+    if fertilizers:
+        fert_list = []
+        for name, data in fertilizers.items():
+            fert_list.append(f"**{name}** - {data['cost']} sheckles\n{data['description']}")
     
-    embed.add_field(
-        name="🧪 Fertilizers",
-        value="\n".join(fert_display),
-        inline=False
-    )
+        embed.add_field(
+            name="🧪 Fertilizers",
+            value="\n".join(fert_list) or "No fertilizers available",
+            inline=False
+        )
 
     await interaction.response.send_message(embed=embed)
 
@@ -954,6 +1037,83 @@ async def growinstant(interaction: discord.Interaction, user: discord.Member, pl
     user_inventory[user.id]["grown"].append(grown_seed)
 
     await interaction.response.send_message(f"🌱 Instantly grew {pretty_seed(grown_seed)} for {user.mention}.", ephemeral=True)
+
+@tasks.loop(hours=24)
+async def rotate_seasons():
+    global current_season
+    current_idx = next((i for i, s in enumerate(SEASONS) if s["name"] == current_season["name"]), 0)
+    next_idx = (current_idx + 1) % len(SEASONS)
+    current_season = SEASONS[next_idx]
+    
+    # Announce season change
+    channel = bot.get_channel(YOUR_ANNOUNCEMENT_CHANNEL_ID)
+    if channel:
+        boosted = ", ".join(current_season["boosted_seeds"])
+        await channel.send(f"🌱 The season has changed to **{current_season['name']}**! Boosted seeds: {boosted}")
+
+@tasks.loop(minutes=30)
+async def check_plant_events():
+    global current_plant_event
+    
+    # Clear expired events
+    if current_plant_event and time.time() > current_plant_event["end_time"]:
+        current_plant_event = None
+    
+    # Random chance to start new event (5% chance per check)
+    if not current_plant_event and random.random() < 0.05:
+        event = random.choice(PLANT_EVENTS)
+        event["start_time"] = time.time()
+        event["end_time"] = time.time() + event["duration"]
+        current_plant_event = event
+        
+        # Announce event
+        channel = bot.get_channel(YOUR_ANNOUNCEMENT_CHANNEL_ID)
+        if channel:
+            desc = (f"All plants grow {event['multiplier']*100}% faster!" 
+                   if event["effect"] == "speed" 
+                   else f"All plants take {event['delay']//60} extra minutes to grow!")
+            await channel.send(
+                f"🌿 **PLANT EVENT: {event['name']}** 🌿\n"
+                f"{desc}\n"
+                f"Duration: {event['duration']//3600} hours"
+            )
+
+@tree.command(name="buy_fertilizer")
+@app_commands.describe(fertilizer="Fertilizer name")
+async def buy_fertilizer(interaction: discord.Interaction, fertilizer: str):
+    fert = fertilizers.get(fertilizer.title())
+    if not fert:
+        return await interaction.response.send_message("❌ Invalid fertilizer", ephemeral=True)
+    
+    if user_sheckles.get(interaction.user.id, 0) < fert["cost"]:
+        return await interaction.response.send_message("❌ Not enough sheckles", ephemeral=True)
+    
+    user_sheckles[interaction.user.id] -= fert["cost"]
+    user_fertilizers[interaction.user.id][fertilizer.title()] += 1
+    
+    await interaction.response.send_message(
+        f"✅ Purchased {fertilizer.title()} for {fert['cost']} sheckles! "
+        f"Use `/use_fertilizer {fertilizer.title()}` to activate it."
+    )
+
+
+@tree.command(name="use_fertilizer")
+@app_commands.describe(fertilizer="Fertilizer name")
+async def use_fertilizer(interaction: discord.Interaction, fertilizer: str):
+    fert_name = fertilizer.title()
+    if user_fertilizers[interaction.user.id].get(fert_name, 0) < 1:
+        return await interaction.response.send_message("❌ You don't have this fertilizer", ephemeral=True)
+    
+    fert = fertilizers[fert_name]
+    user_fertilizers[interaction.user.id][fert_name] -= 1
+    user_active_boosts[interaction.user.id][fert["effect"]["type"] + "_boost"] = {
+        "expires": time.time() + fert["effect"]["duration"],
+        "multiplier": fert["effect"]["multiplier"]
+    }
+    
+    await interaction.response.send_message(
+        f"🌱 Activated {fert_name}! Effect will last for {fert['effect']['duration']//3600} hours."
+    )
 
 @bot.event
 async def on_message(message):
