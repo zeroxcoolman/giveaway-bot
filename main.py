@@ -167,6 +167,31 @@ class GrowingSeed:
 
         return None
 
+def calculate_grow_time(base_seed):
+    """Calculate grow time with season and event modifiers"""
+    grow_time = calculate_grow_time(base)
+    
+    # Season boost
+    if base_seed in current_season["boosted_seeds"]:
+        grow_time *= 0.8  # 20% faster
+    
+    # Plant event
+    if current_plant_event:
+        if current_plant_event["effect"] == "delay":
+            grow_time += current_plant_event["delay"]
+        elif current_plant_event["effect"] == "speed":
+            grow_time *= current_plant_event["multiplier"]
+    
+    return grow_time
+
+def check_achievements(user_id):
+    """Check for new achievement unlocks"""
+    new_achievements = []
+    for name, data in achievement_definitions.items():
+        if name not in user_achievements[user_id] and data["condition"](user_id):
+            user_achievements[user_id].append(name)
+            new_achievements.append(name)
+    return new_achievements
 
 def has_admin_role(member):
     return any(role.name in ADMIN_ROLES for role in member.roles)
@@ -191,6 +216,10 @@ def update_growing_seeds(user_id):
 async def on_ready():
     print(f"Logged in as {bot.user} (ID: {bot.user.id})")
     refresh_stock.start()
+
+    rotate_seasons.start()
+    check_plant_events.start()
+    
     try:
         print("Syncing commands...")
         synced = await tree.sync()
@@ -328,39 +357,32 @@ async def stop_giveaway(interaction: discord.Interaction):
 @tree.command(name="inventory")
 async def inventory(interaction: discord.Interaction):
     update_growing_seeds(interaction.user.id)
+    new_achievements = check_achievements(interaction.user.id)
     
     inv = user_inventory[interaction.user.id]
     
-    # Format grown seeds with mutations and limited status
-    grown_list = []
-    for seed in inv["grown"]:
-        seed_display = seed.name
-        if seed.mutation:
-            seed_display += f" ✨({seed.mutation})"
-        if getattr(seed, "limited", False):
-            seed_display += " 🌟(Limited)"
-        grown_list.append(seed_display)
-    grown = ', '.join(grown_list) or 'None'
+    # Format inventory items
+    grown_list = [pretty_seed(seed) for seed in inv["grown"]]
+    growing_list = [
+        f"{pretty_seed(seed)} [{int(seed.finish_time - time.time())}s]" 
+        for seed in inv["growing"]
+    ]
     
-    # Format growing seeds with mutations, limited status, and time remaining
-    growing_list = []
-    for seed in inv["growing"]:
-        time_left = int(seed.finish_time - time.time())
-        seed_display = seed.name
-        if seed.mutation:
-            seed_display += f" ✨({seed.mutation})"
-        if getattr(seed, "limited", False):
-            seed_display += " 🌟(Limited)"
-        seed_display += f" [{time_left}s]"
-        growing_list.append(seed_display)
-    growing = ', '.join(growing_list) or 'None'
-    
-    sheckles = user_sheckles.get(interaction.user.id, 0)
+    # Format fertilizers
+    ferts = [
+        f"{name}: {count}" 
+        for name, count in user_fertilizers[interaction.user.id].items() 
+        if count > 0
+    ]
     
     embed = discord.Embed(title="🌱 Your Garden & Wallet", color=discord.Color.green())
-    embed.add_field(name="🌾 Growing", value=growing, inline=False)
-    embed.add_field(name="🥕 Grown", value=grown, inline=False)
-    embed.add_field(name="💰 Sheckles", value=str(sheckles), inline=False)
+    embed.add_field(name="🌾 Growing", value='\n'.join(growing_list) or "None", inline=False)
+    embed.add_field(name="🥕 Grown", value='\n'.join(grown_list) or "None", inline=False)
+    embed.add_field(name="🧪 Fertilizers", value='\n'.join(ferts) or "None", inline=False)
+    embed.add_field(name="💰 Sheckles", value=str(user_sheckles.get(interaction.user.id, 0)), inline=False)
+    
+    if new_achievements:
+        embed.set_footer(text=f"🎉 New achievements: {', '.join(new_achievements)}")
     
     await interaction.response.send_message(embed=embed)
 
@@ -392,16 +414,24 @@ async def give_seed(interaction: discord.Interaction, user: discord.Member, seed
     if base not in seeds and base not in limited_seeds:
         return await interaction.response.send_message("❌ Invalid seed name.", ephemeral=True)
 
-    grow_time = time.time() + random.randint(300, 600)
+    # Calculate grow time with modifiers
+    grow_time = calculate_grow_time(base)
     
-    # Check if this is a limited seed and set the flag accordingly
-    is_limited = base in limited_seeds
-    allowed_mutations = limited_seeds[base].get("mutations") if is_limited else None
+    # Handle mutations and boosts
+    allowed_mutations = None
+    if base in limited_seeds:
+        allowed_mutations = limited_seeds[base].get("mutations")
+
+    # Check for active mutation boost
+    if user_active_boosts.get(interaction.user.id, {}).get("mutation_boost"):
+        if time.time() < user_active_boosts[interaction.user.id]["mutation_boost"]["expires"]:
+            # This will be handled in the GrowingSeed class automatically
+            pass
     
     seed_obj = GrowingSeed(
         base, 
         grow_time, 
-        limited=is_limited,  # <-- This is what was missing
+        limited=base in limited_seeds,
         allowed_mutations=allowed_mutations
     )
     
@@ -434,15 +464,37 @@ async def buy_seed(interaction: discord.Interaction, seed: str):
         if user_sheckles.get(interaction.user.id, 0) < sheckles_required:
             return await interaction.response.send_message("❌ Not enough sheckles!", ephemeral=True)
 
+        # Calculate grow time with all modifiers
+        grow_time = calculate_grow_time(base)
+        
+        # Handle mutations and boosts
+        allowed_mutations = None
+        if base in limited_seeds:
+            allowed_mutations = limited_seeds[base].get("mutations")
+
+        # Check for active mutation boost
+        if user_active_boosts.get(interaction.user.id, {}).get("mutation_boost"):
+            if time.time() < user_active_boosts[interaction.user.id]["mutation_boost"]["expires"]:
+                # This will be handled in the GrowingSeed class automatically
+                pass
+        
         # Deduct sheckles and add seed
         user_sheckles[interaction.user.id] -= sheckles_required
-        grow_time = time.time() + random.randint(300, 600)
-        seed_obj = GrowingSeed(base, grow_time)
+        seed_obj = GrowingSeed(
+            base,
+            grow_time,
+            allowed_mutations=allowed_mutations
+        )
         user_inventory[interaction.user.id]["growing"].append(seed_obj)
+
+        # Check for new achievements
+        new_achievements = check_achievements(interaction.user.id)
+        achievement_msg = f"\n🎉 New achievement(s): {', '.join(new_achievements)}" if new_achievements else ""
 
         return await interaction.response.send_message(
             f"✅ Purchased {pretty_seed(seed_obj)} seed for {sheckles_required} sheckles! "
             f"It will be ready in {int(grow_time - time.time())} seconds."
+            f"{achievement_msg}"
         )
 
     # Check if seed is in limited shop
@@ -460,17 +512,34 @@ async def buy_seed(interaction: discord.Interaction, seed: str):
                 f"❌ You need to send {seed_data['quest']} messages to unlock this seed!", ephemeral=True
             )
 
+        # Calculate grow time with all modifiers
+        grow_time = calculate_grow_time(base)
+        
+        # Handle mutations and boosts
+        allowed_mutations = seed_data.get("mutations")
+        if user_active_boosts.get(interaction.user.id, {}).get("mutation_boost"):
+            if time.time() < user_active_boosts[interaction.user.id]["mutation_boost"]["expires"]:
+                # Handled in GrowingSeed class
+                pass
+
         # Deduct sheckles and add seed (mark as limited)
         user_sheckles[interaction.user.id] -= sheckles_required
-        grow_time = time.time() + random.randint(300, 600)
-        allowed_mutations = seed_data.get("mutations", [])
-
-        seed_obj = GrowingSeed(base, grow_time, limited=True, allowed_mutations=allowed_mutations)
+        seed_obj = GrowingSeed(
+            base,
+            grow_time,
+            limited=True,
+            allowed_mutations=allowed_mutations
+        )
         user_inventory[interaction.user.id]["growing"].append(seed_obj)
+
+        # Check for new achievements
+        new_achievements = check_achievements(interaction.user.id)
+        achievement_msg = f"\n🎉 New achievement(s): {', '.join(new_achievements)}" if new_achievements else ""
 
         return await interaction.response.send_message(
             f"✅ Purchased limited {pretty_seed(seed_obj)} seed for {sheckles_required} sheckles! "
             f"It will be ready in {int(grow_time - time.time())} seconds."
+            f"{achievement_msg}"
         )
 
     else:
@@ -671,7 +740,7 @@ async def trade_logs_command(interaction: discord.Interaction):
 
 @tree.command(name="shoplist")
 async def shoplist(interaction: discord.Interaction):
-    # Purge expired limited seeds first
+    # Purge expired limited seeds
     global limited_seeds
     limited_seeds = {
         name: data for name, data in limited_seeds.items()
@@ -680,23 +749,22 @@ async def shoplist(interaction: discord.Interaction):
 
     embed = discord.Embed(title="🛒 Seed Shop", color=discord.Color.purple())
 
-    # --- REGULAR STOCK SECTION --- (FIXED)
-    if current_stock:  # Only show if there are regular seeds
+    # Regular Stock
+    if current_stock:
         regular_seeds = []
         for seed in current_stock:
-            if seed in seeds:  # Verify seed exists in main dictionary
+            if seed in seeds:
                 cost, quest = seeds[seed]
                 rarity = SEED_RARITIES.get(seed, "Unknown")
                 regular_seeds.append(f"**{seed}** - {cost} sheckles ({rarity})")
         
-        if regular_seeds:  # Only add section if there are valid regular seeds
-            embed.add_field(
-                name="🔹 Regular Stock",
-                value="\n".join(regular_seeds) or "No regular seeds available",
-                inline=False
-            )
+        embed.add_field(
+            name="🔹 Regular Stock",
+            value="\n".join(regular_seeds) or "No regular seeds available",
+            inline=False
+        )
 
-    # --- LIMITED SEEDS SECTION ---
+    # Limited Seeds
     active_limited = [
         (name, data) for name, data in limited_seeds.items()
         if (time.time() < data["expires"] and data["sheckles"] > 0)
@@ -705,7 +773,7 @@ async def shoplist(interaction: discord.Interaction):
     if active_limited:
         limited_display = []
         for name, data in active_limited:
-            time_left = max(0, int((data["expires"] - time.time()) // 60))
+            time_left = max(0, int((data["expires"] - time.time()) // 60)
             muts = "All mutations" if data.get("mutations") is None else ", ".join(data["mutations"])
             limited_display.append(
                 f"**{name}**\n"
@@ -720,6 +788,17 @@ async def shoplist(interaction: discord.Interaction):
             value="\n".join(limited_display) or "No active limited seeds",
             inline=False
         )
+
+    # Fertilizers
+    fert_display = []
+    for name, data in fertilizers.items():
+        fert_display.append(f"**{name}** - {data['cost']} sheckles\n{data['description']}")
+    
+    embed.add_field(
+        name="🧪 Fertilizers",
+        value="\n".join(fert_display),
+        inline=False
+    )
 
     await interaction.response.send_message(embed=embed)
 
