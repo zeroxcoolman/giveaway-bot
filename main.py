@@ -835,14 +835,14 @@ async def shoplist(interaction: discord.Interaction):
         if time.time() < data["expires"] and data["sheckles"] > 0
     }
 
+    embed = discord.Embed(title="🛒 Seed Shop", color=discord.Color.purple())
+
     embed.add_field(
     name="🌦 Current Season",
     value=f"{current_season['name']} (Boosted: {', '.join(current_season['boosted_seeds'])})",
     inline=False
     )
-
-    embed = discord.Embed(title="🛒 Seed Shop", color=discord.Color.purple())
-
+    
     # Regular Stock
     if current_stock:
         regular_seeds = []
