@@ -30,7 +30,7 @@ user_achievements = defaultdict(list)  # user_id -> list of achievement names
 current_plant_event = None
 user_fertilizers = defaultdict(lambda: defaultdict(int))  # user_id -> {fertilizer_name: count}
 user_active_boosts = defaultdict(dict)  # user_id -> {boost_type: {expires: timestamp, multiplier: float}}
-YOUR_ANNOUNCEMENT_CHANNEL_ID = 1342973779793416212
+YOUR_ANNOUNCEMENT_CHANNEL_ID = 1386095247997665521
 
 fertilizers = {
     "Growth Boost": {
