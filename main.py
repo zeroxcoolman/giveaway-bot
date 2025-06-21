@@ -238,7 +238,7 @@ def calculate_grow_time(base_seed, user_id):
         "Carrot": 300,      # 5 minutes
         "Strawberry": 300,  # 5 minutes
         "Potato": 300,      # 5 minutes
-        "Bamboo": 300,      # 15 minutes
+        "Bamboo": 300,      # 5 minutes
         "Ember Lily": 300,  # 5 minutes
         "Sugar Apple": 300, # 5 minutes
         "Beanstalk": 300   # 5 minutes
@@ -581,7 +581,7 @@ async def buy_seed(interaction: discord.Interaction, seed: str):
 
         return await interaction.response.send_message(
             f"✅ Purchased {pretty_seed(seed_obj)} seed for {sheckles_required} sheckles! "
-            f"It will be ready in {int(grow_time - time.time())} seconds."
+            f"It will be ready in {int((time.time() + grow_time) - time.time())} seconds."
             f"{achievement_msg}"
         )
 
