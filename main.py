@@ -10,7 +10,6 @@ from collections import defaultdict
 from typing import Optional
 from discord.ui import Select, Button, View
 from discord import ButtonStyle
-import sqlite3
 
 intents = discord.Intents.default()
 intents.messages = True
@@ -23,6 +22,7 @@ tree = bot.tree
 
 GIVEAWAY_CHANNEL_NAME = "🎁︱𝒩𝓊𝓂𝒷𝑒𝓇-𝒢𝒾𝓋𝑒𝒶𝓌𝒶𝓎"
 ADMIN_ROLES = ["𝓞𝔀𝓷𝓮𝓻 👑", "Tuff nonchalant aurafarmer sigma pro admin", "Administrator™🌟"]
+ADMIN_ROLE_IDS = [1342599762993741855, 1385318110747164775, 1343263454114480161]
 MESSAGES_PER_SHECKLE = 10  # Number of messages needed to earn 1 sheckle
 
 active_giveaways = {}
@@ -599,7 +599,7 @@ def check_achievements(user_id):
     return new_achievements
 
 def has_admin_role(member):
-    return any(role.name in ADMIN_ROLES for role in member.roles)
+    return any(role.id in ADMIN_ROLE_IDS for role in member.roles)
 
 @bot.event
 async def on_ready():
