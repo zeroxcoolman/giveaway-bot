@@ -1023,6 +1023,7 @@ async def trade_offer(interaction: discord.Interaction, user: discord.Member, yo
         ),
         color=discord.Color.blue()
     )
+    embed.set_footer(text="This trade offer will expire in 5 minutes")
     
     view = TradeView(interaction.user, user, sender_seed_obj, recipient_seed_obj)
     
@@ -1031,7 +1032,6 @@ async def trade_offer(interaction: discord.Interaction, user: discord.Member, yo
         embed=embed,
         view=view
     )
-
 
 
 @tree.command(name="trade_offers")
