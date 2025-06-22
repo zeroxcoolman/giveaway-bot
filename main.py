@@ -424,10 +424,6 @@ class SeedShopView(View):
 
 class SeedSelect(Select):
     def __init__(self, regular_seeds, limited_seeds, fertilizers):
-        self.regular_seeds = regular_seeds  # Store these as instance attributes
-        self.limited_seeds = limited_seeds
-        self.fertilizers = fertilizers
-        
         options = []
         
         # Add regular seeds
@@ -437,16 +433,16 @@ class SeedSelect(Select):
             options.append(discord.SelectOption(
                 label=f"{seed} - {cost} sheckles",
                 description=f"{rarity} | Quest: {quest} messages",
-                value=f"seed_{seed}_{random.randint(0, 99999)}"
+                value=f"seed_{seed}"  # Simplified value format
             ))
         
         # Add limited seeds
         for name, data in limited_seeds.items():
-            time_left = max(0, int((data["expires"] - time.time()) // 60))
+            time_left = max(0, int((data["expires"] - time.time()) // 60)
             options.append(discord.SelectOption(
                 label=f"🌟 {name} - {data['sheckles']} sheckles",
                 description=f"Limited | {time_left}min left | Quest: {data['quest']}",
-                value=f"limited_{name}_{random.randint(0, 99999)}"
+                value=f"limited_{name}"  # Simplified value format
             ))
         
         # Add fertilizers
@@ -454,7 +450,7 @@ class SeedSelect(Select):
             options.append(discord.SelectOption(
                 label=f"🧪 {name} - {data['cost']} sheckles",
                 description=data["description"],
-                value=f"fert_{name}_{random.randint(0, 99999)}"
+                value=f"fert_{name}"  # Simplified value format
             ))
         
         super().__init__(
@@ -465,26 +461,23 @@ class SeedSelect(Select):
         )
     
     async def callback(self, interaction: discord.Interaction):
-        # Extract the base value without the random number
-        base_value = "_".join(self.values[0].split("_")[:-1])
-        base_value = "_".join(base_value)  # Rejoin with underscores
+        value = self.values[0]
         
-        if base_value.startswith("seed_"):
-            seed = base_value[5:]
+        if value.startswith("seed_"):
+            seed = value[5:]  # Remove "seed_" prefix
             await self.handle_seed_purchase(interaction, seed, is_limited=False)
-        elif base_value.startswith("limited_"):
-            seed = base_value[8:]
+        elif value.startswith("limited_"):
+            seed = value[8:]  # Remove "limited_" prefix
             await self.handle_seed_purchase(interaction, seed, is_limited=True)
-        elif base_value.startswith("fert_"):
-            fert = base_value[5:]
+        elif value.startswith("fert_"):
+            fert = value[5:]  # Remove "fert_" prefix
             await self.handle_fertilizer_purchase(interaction, fert)
-    
+        
         # Reset the view to allow selecting the same item again
         view = SeedShopView(self.regular_seeds, self.limited_seeds, self.fertilizers)
         await interaction.response.edit_message(view=view)
 
     async def handle_seed_purchase(self, interaction: discord.Interaction, seed_name: str, is_limited: bool):
-        base = seed_name
         user_id = interaction.user.id
         
         if is_limited:
@@ -497,46 +490,43 @@ class SeedSelect(Select):
             if time.time() > seed_data["expires"]:
                 return await interaction.response.send_message("❌ This limited seed has expired.", ephemeral=True)
                 
-            # REMOVED THE QUEST CHECK HERE
             allowed_mutations = seed_data.get("mutations")
         else:
             if seed_name not in seeds:
                 return await interaction.response.send_message("❌ This seed is not available.", ephemeral=True)
             
-            sheckles_required, quest = seeds[seed_name]
+            sheckles_required, _ = seeds[seed_name]
             allowed_mutations = None
-            
-            # REMOVED THE QUEST CHECK HERE
     
         if user_sheckles.get(user_id, 0) < sheckles_required:
             return await interaction.response.send_message("❌ Not enough sheckles!", ephemeral=True)
     
-        grow_time = calculate_grow_time(base, user_id)
-        
-        # Check for active mutation boost
-        if user_active_boosts.get(user_id, {}).get("mutation_boost"):
-            if time.time() < user_active_boosts[user_id]["mutation_boost"]["expires"]:
-                pass
-        
+        # Deduct sheckles
         user_sheckles[user_id] -= sheckles_required
+        
+        # Calculate grow time
+        grow_time = calculate_grow_time(seed_name, user_id)
+        
+        # Create seed object
         seed_obj = GrowingSeed(
-            base,
+            seed_name,
             grow_time,
             limited=is_limited,
             allowed_mutations=allowed_mutations
         )
+        
+        # Add to inventory
         user_inventory[user_id]["growing"].append(seed_obj)
     
         new_achievements = check_achievements(user_id)
         achievement_msg = f"\n🎉 New achievement(s): {', '.join(new_achievements)}" if new_achievements else ""
     
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f"✅ Purchased {'limited ' if is_limited else ''}{pretty_seed(seed_obj)} seed for {sheckles_required} sheckles! "
             f"It will be ready in {int(grow_time)} seconds."
             f"{achievement_msg}",
             ephemeral=True
         )
-
     
     async def handle_fertilizer_purchase(self, interaction: discord.Interaction, fert_name: str):
         fert = fertilizers.get(fert_name)
