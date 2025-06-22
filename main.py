@@ -442,7 +442,7 @@ class SeedSelect(Select):
         
         # Add limited seeds
         for name, data in limited_seeds.items():
-            time_left = max(0, int((data["expires"] - time.time()) // 60))
+            time_left = max(0, int((data["expires"] - time.time()) // 60)
             options.append(discord.SelectOption(
                 label=f"🌟 {name} - {data['sheckles']} sheckles",
                 description=f"Limited | {time_left}min left | Quest: {data['quest']}",
@@ -467,21 +467,25 @@ class SeedSelect(Select):
     async def callback(self, interaction: discord.Interaction):
         value = self.values[0]
         
-        if value.startswith("seed_"):
-            await self.handle_seed_purchase(interaction, value[5:], is_limited=False)
-        elif value.startswith("limited_"):
-            await self.handle_seed_purchase(interaction, value[8:], is_limited=True)
-        elif value.startswith("fert_"):
-            await self.handle_fertilizer_purchase(interaction, value[5:])
+        # Defer the response first to prevent timeout
+        await interaction.response.defer(ephemeral=True)
         
-        # Don't try to edit the response here since we already responded in the handlers
-        # Instead, recreate the view for the original message
         try:
+            if value.startswith("seed_"):
+                await self.handle_seed_purchase(interaction, value[5:], is_limited=False)
+            elif value.startswith("limited_"):
+                await self.handle_seed_purchase(interaction, value[8:], is_limited=True)
+            elif value.startswith("fert_"):
+                await self.handle_fertilizer_purchase(interaction, value[5:])
+            
+            # Get the original message to edit the view
             message = await interaction.original_response()
             view = SeedShopView(self.regular_seeds, self.limited_seeds, self.fertilizers)
             await message.edit(view=view)
-        except discord.NotFound:
-            pass  # Message was deleted or we can't edit it
+            
+        except Exception as e:
+            print(f"Error in callback: {e}")
+            await interaction.followup.send("❌ An error occurred while processing your request.", ephemeral=True)
 
     async def handle_seed_purchase(self, interaction: discord.Interaction, seed_name: str, is_limited: bool):
         user_id = interaction.user.id
