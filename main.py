@@ -438,7 +438,7 @@ class SeedSelect(Select):
         
         # Add limited seeds
         for name, data in limited_seeds.items():
-            time_left = max(0, int((data["expires"] - time.time()) // 60)
+            time_left = max(0, int((data["expires"] - time.time()) // 60))
             options.append(discord.SelectOption(
                 label=f"🌟 {name} - {data['sheckles']} sheckles",
                 description=f"Limited | {time_left}min left | Quest: {data['quest']}",
