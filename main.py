@@ -244,6 +244,28 @@ class TradeView(View):
         except:
             pass
 
+    @discord.ui.button(label="Decline Trade", style=ButtonStyle.red)
+    async def decline(self, interaction: discord.Interaction, button: Button):
+        if interaction.user.id != self.recipient.id:
+            return await interaction.response.send_message("❌ This trade isn't for you!", ephemeral=True)
+            
+        trade_offers.pop(self.recipient.id, None)
+            
+        embed = discord.Embed(
+            title="❌ Trade Declined",
+            description=f"{self.recipient.mention} declined the trade offer from {self.sender.mention}",
+            color=discord.Color.red()
+        )
+            
+        self.accept.disabled = True
+        self.decline.disabled = True
+        await interaction.response.edit_message(embed=embed, view=self)
+            
+        try:
+            await self.sender.send(f"❌ {self.recipient.mention} declined your trade offer.")
+        except:
+            pass
+
 class GiveawayView(View):
     def __init__(self, giveaway):
         super().__init__(timeout=None)  # Persistent view
@@ -992,83 +1014,7 @@ async def trade_offer(interaction: discord.Interaction, user: discord.Member, yo
         view=view
     )
 
-@tree.command(name="trade_accept")
-@app_commands.describe(user="User who sent the trade offer")
-async def trade_accept(interaction: discord.Interaction, user: discord.Member):
-    update_growing_seeds(interaction.user.id)
-    update_growing_seeds(user.id)
 
-    recipient_id = interaction.user.id
-    sender_id = user.id
-
-    offer = trade_offers.get(recipient_id)
-    if not offer or offer["sender_id"] != sender_id:
-        return await interaction.response.send_message("❌ No trade offer from that user.", ephemeral=True)
-
-    # Check expiration
-    if time.time() - offer["timestamp"] > 300:
-        trade_offers.pop(recipient_id)
-        return await interaction.response.send_message("❌ Trade offer expired.", ephemeral=True)
-
-    sender_grown = user_inventory[sender_id]["grown"]
-    recipient_grown = user_inventory[recipient_id]["grown"]
-
-    # Find exact matching seeds
-    sender_seed = next((s for s in sender_grown if s.name == offer["sender_seed_name"] and s.mutation == offer["sender_seed_mut"]), None)
-    recipient_seed = next((s for s in recipient_grown if s.name == offer["recipient_seed_name"] and s.mutation == offer["recipient_seed_mut"]), None)
-
-    if not sender_seed or not recipient_seed:
-        trade_offers.pop(recipient_id)
-        return await interaction.response.send_message("❌ One or both seeds no longer available.", ephemeral=True)
-
-    # Perform trade (swap objects directly)
-    sender_grown.remove(sender_seed)
-    recipient_grown.remove(recipient_seed)
-    sender_grown.append(recipient_seed)
-    recipient_grown.append(sender_seed)
-
-    trade_logs.append({
-        "from": sender_id,
-        "to": recipient_id,
-        "gave": sender_seed.name,
-        "got": recipient_seed.name,
-        "time": time.time()
-    })
-
-    trade_offers.pop(recipient_id)
-
-    received = pretty_seed(sender_seed)
-    given = pretty_seed(recipient_seed)
-
-    await interaction.response.send_message(f"✅ Trade complete! You received **{received}** and gave **{given}**.")
-    try:
-        sender_user = await bot.fetch_user(sender_id)
-        await sender_user.send(f"✅ Your trade with {interaction.user.mention} completed! You got **{given}** and gave **{received}**.")
-    except:
-        pass
-
-
-@discord.ui.button(label="Decline Trade", style=ButtonStyle.red)
-async def decline(self, interaction: discord.Interaction, button: Button):
-    if interaction.user.id != self.recipient.id:
-        return await interaction.response.send_message("❌ This trade isn't for you!", ephemeral=True)
-        
-    trade_offers.pop(self.recipient.id, None)
-        
-    embed = discord.Embed(
-        title="❌ Trade Declined",
-        description=f"{self.recipient.mention} declined the trade offer from {self.sender.mention}",
-        color=discord.Color.red()
-    )
-        
-    self.accept.disabled = True
-    self.decline.disabled = True
-    await interaction.response.edit_message(embed=embed, view=self)
-        
-    try:
-        await self.sender.send(f"❌ {self.recipient.mention} declined your trade offer.")
-    except:
-        pass
 
 @tree.command(name="trade_offers")
 async def view_trade_offers(interaction: discord.Interaction):
@@ -1093,7 +1039,7 @@ async def view_trade_offers(interaction: discord.Interaction):
         f"From: {sender.mention}\n"
         f"They offer: {from_seed}\n"
         f"They want: {to_seed}\n"
-        f"Use `/trade_accept @{sender.name}` or `/trade_decline @{sender.name}`"
+        f"Check the trade message to accept/decline!"
     )
 
     await interaction.response.send_message(msg, ephemeral=True)
