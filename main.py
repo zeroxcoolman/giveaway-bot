@@ -417,13 +417,17 @@ class SeedShopView(View):
     def __init__(self, regular_seeds, limited_seeds, fertilizers):
         super().__init__(timeout=120)
         self.regular_seeds = regular_seeds
-        self.limited_seeds = limited_seeds  # This should be a dictionary
+        self.limited_seeds = limited_seeds
         self.fertilizers = fertilizers
         self.add_item(SeedSelect(regular_seeds, limited_seeds, fertilizers))
 
 
 class SeedSelect(Select):
     def __init__(self, regular_seeds, limited_seeds, fertilizers):
+        self.regular_seeds = regular_seeds
+        self.limited_seeds = limited_seeds
+        self.fertilizers = fertilizers
+        
         options = []
         
         # Add regular seeds
@@ -433,7 +437,7 @@ class SeedSelect(Select):
             options.append(discord.SelectOption(
                 label=f"{seed} - {cost} sheckles",
                 description=f"{rarity} | Quest: {quest} messages",
-                value=f"seed_{seed}"  # Simplified value format
+                value=f"seed_{seed}"
             ))
         
         # Add limited seeds
@@ -442,7 +446,7 @@ class SeedSelect(Select):
             options.append(discord.SelectOption(
                 label=f"🌟 {name} - {data['sheckles']} sheckles",
                 description=f"Limited | {time_left}min left | Quest: {data['quest']}",
-                value=f"limited_{name}"  # Simplified value format
+                value=f"limited_{name}"
             ))
         
         # Add fertilizers
@@ -450,7 +454,7 @@ class SeedSelect(Select):
             options.append(discord.SelectOption(
                 label=f"🧪 {name} - {data['cost']} sheckles",
                 description=data["description"],
-                value=f"fert_{name}"  # Simplified value format
+                value=f"fert_{name}"
             ))
         
         super().__init__(
@@ -464,16 +468,16 @@ class SeedSelect(Select):
         value = self.values[0]
         
         if value.startswith("seed_"):
-            seed = value[5:]  # Remove "seed_" prefix
+            seed = value[5:]
             await self.handle_seed_purchase(interaction, seed, is_limited=False)
         elif value.startswith("limited_"):
-            seed = value[8:]  # Remove "limited_" prefix
+            seed = value[8:]
             await self.handle_seed_purchase(interaction, seed, is_limited=True)
         elif value.startswith("fert_"):
-            fert = value[5:]  # Remove "fert_" prefix
+            fert = value[5:]
             await self.handle_fertilizer_purchase(interaction, fert)
         
-        # Reset the view to allow selecting the same item again
+        # Reset the view with the stored attributes
         view = SeedShopView(self.regular_seeds, self.limited_seeds, self.fertilizers)
         await interaction.response.edit_message(view=view)
 
