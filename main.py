@@ -415,18 +415,10 @@ class SeedShopView(View):
     def __init__(self, regular_seeds, limited_seeds, fertilizers):
         super().__init__(timeout=120)
         self.regular_seeds = regular_seeds
-        self.limited_seeds = limited_seeds
+        self.limited_seeds = limited_seeds  # This should be a dictionary
         self.fertilizers = fertilizers
         self.add_item(SeedSelect(regular_seeds, limited_seeds, fertilizers))
 
-
-class SeedShopView(View):
-    def __init__(self, regular_seeds, limited_seeds, fertilizers):
-        super().__init__(timeout=120)
-        self.regular_seeds = regular_seeds
-        self.limited_seeds = limited_seeds
-        self.fertilizers = fertilizers
-        self.add_item(SeedSelect(regular_seeds, limited_seeds, fertilizers))
 
 class SeedSelect(Select):
     def __init__(self, regular_seeds, limited_seeds, fertilizers):
@@ -442,7 +434,7 @@ class SeedSelect(Select):
                 value=f"seed_{seed}_{random.randint(0, 99999)}"  # Add random number to make value unique
             ))
         
-        # Add limited seeds
+        # Add limited seeds - limited_seeds is now a dictionary
         for name, data in limited_seeds.items():
             time_left = max(0, int((data["expires"] - time.time()) // 60))
             options.append(discord.SelectOption(
@@ -469,7 +461,6 @@ class SeedSelect(Select):
     async def callback(self, interaction: discord.Interaction):
         # Extract the base value without the random number
         base_value = "_".join(self.values[0].split("_")[:-1])
-        base_value = "_".join(base_value)  # Rejoin with underscores
         
         if base_value.startswith("seed_"):
             seed = base_value[5:]
@@ -1153,14 +1144,8 @@ async def shoplist(interaction: discord.Interaction):
         inline=False
     )
     
-    # Prepare data for the dropdown
-    active_limited = [
-        (name, data) for name, data in limited_seeds.items()
-        if (time.time() < data["expires"] and data["sheckles"] > 0)
-    ]
-
-    # Send the view with dropdown
-    view = SeedShopView(current_stock, active_limited, fertilizers)
+    # Send the view with dropdown - pass limited_seeds directly (it's already a dict)
+    view = SeedShopView(current_stock, limited_seeds, fertilizers)
     await interaction.response.send_message(embed=embed, view=view)
 
 @tree.command(name="sell_seed")
