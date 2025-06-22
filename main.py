@@ -616,23 +616,6 @@ def check_achievements(user_id):
 def has_admin_role(member):
     return any(role.name in ADMIN_ROLES for role in member.roles)
 
-def update_growing_seeds(user_id):
-    """Move finished growing seeds to grown inventory"""
-    current_time = time.time()
-    growing = user_inventory[user_id]["growing"]
-    grown = user_inventory[user_id]["grown"]
-    
-    # Find all seeds that are done growing
-    finished_seeds = [seed for seed in growing if seed.finish_time <= current_time]
-    
-    # Move them to grown
-    for seed in finished_seeds:
-        grown.append(seed)
-    
-    # Remove them from growing
-    user_inventory[user_id]["growing"] = [seed for seed in growing if seed.finish_time > current_time]
-
-
 @bot.event
 async def on_ready():
     print(f"Logged in as {bot.user} (ID: {bot.user.id})")
@@ -1497,6 +1480,13 @@ async def cleanup_expired():
     for user_id, offer in list(trade_offers.items()):
         if current_time - offer["timestamp"] > 300:  # 5 minutes
             trade_offers.pop(user_id)
+            try:
+                sender = await bot.fetch_user(offer["sender_id"])
+                recipient = await bot.fetch_user(user_id)
+                await sender.send(f"❌ Your trade offer to {recipient.name} has expired.")
+            except:
+                pass
+
     
     # Clean expired boosts
     for user_id, boosts in list(user_active_boosts.items()):
