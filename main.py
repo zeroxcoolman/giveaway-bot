@@ -10,6 +10,7 @@ from collections import defaultdict
 from typing import Optional
 from discord.ui import Select, Button, View
 from discord import ButtonStyle
+import sqlite3
 
 intents = discord.Intents.default()
 intents.messages = True
@@ -33,6 +34,22 @@ current_plant_event = None
 user_fertilizers = defaultdict(lambda: defaultdict(int))  # user_id -> {fertilizer_name: count}
 user_active_boosts = defaultdict(dict)  # user_id -> {boost_type: {expires: timestamp, multiplier: float}}
 YOUR_ANNOUNCEMENT_CHANNEL_ID = 1386095247997665521
+
+def init_db():
+    conn = sqlite3.connect('bot_data.db')
+    c = conn.cursor()
+    
+    # Create tables
+    c.execute('''CREATE TABLE IF NOT EXISTS users 
+                 (user_id INTEGER PRIMARY KEY, sheckles INTEGER, messages INTEGER)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS inventory
+                 (user_id INTEGER, seed_name TEXT, mutation TEXT, 
+                  limited BOOLEAN, finish_time REAL, is_growing BOOLEAN)''')
+    # Add other tables as needed
+    conn.commit()
+    conn.close()
+
+init_db()  # Call this at startup
 
 fertilizers = {
     "Growth Boost": {
@@ -623,6 +640,7 @@ async def on_ready():
 
     rotate_seasons.start()
     check_plant_events.start()
+    cleanup_expired.start()
     
     try:
         print("Syncing commands...")
@@ -1458,6 +1476,22 @@ async def shovel(
         embed.set_footer(text="⚠️ Limited and mutated plants cannot be recovered!")
     
     await interaction.followup.send(embed=embed, ephemeral=True)
+
+@tasks.loop(minutes=5)
+async def cleanup_expired():
+    """Clean up expired trades and boosts"""
+    current_time = time.time()
+    
+    # Clean expired trades
+    for user_id, offer in list(trade_offers.items()):
+        if current_time - offer["timestamp"] > 300:  # 5 minutes
+            trade_offers.pop(user_id)
+    
+    # Clean expired boosts
+    for user_id, boosts in list(user_active_boosts.items()):
+        for boost_type, boost_data in list(boosts.items()):
+            if boost_data["expires"] < current_time:
+                del user_active_boosts[user_id][boost_type]
 
 @bot.event
 async def on_message(message):
