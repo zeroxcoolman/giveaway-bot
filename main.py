@@ -189,7 +189,7 @@ class TradeView(View):
     @discord.ui.button(label="Accept Trade", style=ButtonStyle.green)
     async def accept(self, interaction: discord.Interaction, button: Button):
         if interaction.user.id != self.recipient.id:
-            return await interaction.response.send_message("❌ This trade isn't for you!", ephemeral=True)
+            return await interaction.followup.send("❌ This trade isn't for you!", ephemeral=True)
         
         # Perform the trade
         update_growing_seeds(self.sender.id)
@@ -204,7 +204,7 @@ class TradeView(View):
         
         if not sender_seed or not recipient_seed:
             trade_offers.pop(self.recipient.id, None)
-            return await interaction.response.send_message("❌ One or both seeds no longer available.", ephemeral=True)
+            return await interaction.followup.send("❌ One or both seeds no longer available.", ephemeral=True)
         
         # Perform swap
         sender_grown.remove(sender_seed)
@@ -249,7 +249,7 @@ class TradeView(View):
     @discord.ui.button(label="Decline Trade", style=ButtonStyle.red)
     async def decline(self, interaction: discord.Interaction, button: Button):
         if interaction.user.id != self.recipient.id:
-            return await interaction.response.send_message("❌ This trade isn't for you!", ephemeral=True)
+            return await interaction.followup.send("❌ This trade isn't for you!", ephemeral=True)
             
         trade_offers.pop(self.recipient.id, None)
             
@@ -276,7 +276,7 @@ class GiveawayView(View):
     @discord.ui.button(label="Join Giveaway", style=ButtonStyle.green, custom_id="join_giveaway")
     async def join_giveaway(self, interaction: discord.Interaction, button: Button):
         if interaction.channel.id != self.giveaway.channel.id:
-            return await interaction.response.send_message("❌ This button only works in the giveaway channel!", ephemeral=True)
+            return await interaction.followup.send("❌ This button only works in the giveaway channel!", ephemeral=True)
         
         await interaction.response.send_modal(GuessModal(self.giveaway))
 
@@ -296,7 +296,7 @@ class GuessModal(discord.ui.Modal):
         try:
             guess = int(self.guess.value)
             if guess < self.giveaway.low or guess > self.giveaway.high:
-                return await interaction.response.send_message(
+                return await interaction.followup.send(
                     f"❌ Guess must be between {self.giveaway.low} and {self.giveaway.high}!",
                     ephemeral=True
                 )
@@ -310,17 +310,17 @@ class GuessModal(discord.ui.Modal):
                 if len(self.giveaway.winners) >= self.giveaway.winners_required:
                     await end_giveaway(self.giveaway)
                 else:
-                    await interaction.response.send_message(
+                    await interaction.followup.send(
                         "🎉 Correct guess! You're a winner!",
                         ephemeral=True
                     )
             else:
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     "❌ Incorrect guess, try again!",
                     ephemeral=True
                 )
         except ValueError:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "❌ Please enter a valid number!",
                 ephemeral=True
             )
@@ -468,42 +468,44 @@ class SeedSelect(Select):
         value = self.values[0]
         
         if value.startswith("seed_"):
-            seed = value[5:]
-            await self.handle_seed_purchase(interaction, seed, is_limited=False)
+            await self.handle_seed_purchase(interaction, value[5:], is_limited=False)
         elif value.startswith("limited_"):
-            seed = value[8:]
-            await self.handle_seed_purchase(interaction, seed, is_limited=True)
+            await self.handle_seed_purchase(interaction, value[8:], is_limited=True)
         elif value.startswith("fert_"):
-            fert = value[5:]
-            await self.handle_fertilizer_purchase(interaction, fert)
+            await self.handle_fertilizer_purchase(interaction, value[5:])
         
-        # Reset the view with the stored attributes
-        view = SeedShopView(self.regular_seeds, self.limited_seeds, self.fertilizers)
-        await interaction.response.edit_message(view=view)
+        # Don't try to edit the response here since we already responded in the handlers
+        # Instead, recreate the view for the original message
+        try:
+            message = await interaction.original_response()
+            view = SeedShopView(self.regular_seeds, self.limited_seeds, self.fertilizers)
+            await message.edit(view=view)
+        except discord.NotFound:
+            pass  # Message was deleted or we can't edit it
 
     async def handle_seed_purchase(self, interaction: discord.Interaction, seed_name: str, is_limited: bool):
         user_id = interaction.user.id
         
         if is_limited:
             if seed_name not in limited_seeds:
-                return await interaction.response.send_message("❌ This limited seed is no longer available.", ephemeral=True)
+                return await interaction.followup.send("❌ This limited seed is no longer available.", ephemeral=True)
             
             seed_data = limited_seeds[seed_name]
             sheckles_required = seed_data["sheckles"]
             
             if time.time() > seed_data["expires"]:
-                return await interaction.response.send_message("❌ This limited seed has expired.", ephemeral=True)
+                return await interaction.followup.send("❌ This limited seed has expired.", ephemeral=True)
                 
             allowed_mutations = seed_data.get("mutations")
         else:
             if seed_name not in seeds:
-                return await interaction.response.send_message("❌ This seed is not available.", ephemeral=True)
+                return await interaction.followup.send("❌ This seed is not available.", ephemeral=True)
             
             sheckles_required, _ = seeds[seed_name]
             allowed_mutations = None
     
         if user_sheckles.get(user_id, 0) < sheckles_required:
-            return await interaction.response.send_message("❌ Not enough sheckles!", ephemeral=True)
+            return await interaction.followup.send("❌ Not enough sheckles!", ephemeral=True)
     
         # Deduct sheckles
         user_sheckles[user_id] -= sheckles_required
@@ -535,17 +537,17 @@ class SeedSelect(Select):
     async def handle_fertilizer_purchase(self, interaction: discord.Interaction, fert_name: str):
         fert = fertilizers.get(fert_name)
         if not fert:
-            return await interaction.response.send_message("❌ Invalid fertilizer", ephemeral=True)
+            return await interaction.followup.send("❌ Invalid fertilizer", ephemeral=True)
         
         user_id = interaction.user.id
         
         if user_sheckles.get(user_id, 0) < fert["cost"]:
-            return await interaction.response.send_message("❌ Not enough sheckles", ephemeral=True)
+            return await interaction.followup.send("❌ Not enough sheckles", ephemeral=True)
         
         user_sheckles[user_id] -= fert["cost"]
         user_fertilizers[user_id][fert_name] += 1
         
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f"✅ Purchased {fert_name} for {fert['cost']} sheckles! "
             f"You now have {user_fertilizers[user_id][fert_name]} of this fertilizer.",
             ephemeral=True
@@ -569,7 +571,7 @@ class ShovelConfirmView(discord.ui.View):
     @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.stop()
-        await interaction.response.send_message("🚫 Removal cancelled.", ephemeral=True)
+        await interaction.followup.send("🚫 Removal cancelled.", ephemeral=True)
 
 class Giveaway:
     def __init__(self, hoster, prize, winners, number_range, target, duration, channel):
@@ -729,7 +731,7 @@ async def add_limited_seed(
     mutations: str = ""
 ):
     if not has_admin_role(interaction.user):
-        return await interaction.response.send_message("❌ Not allowed", ephemeral=True)
+        return await interaction.followup.send("❌ Not allowed", ephemeral=True)
 
     normalized_name, _, _ = normalize_seed_name(name)
 
@@ -748,7 +750,7 @@ async def add_limited_seed(
         # Check if any are invalid
         invalid = [m for m in mutation_list if m not in valid_mutations]
         if invalid:
-            return await interaction.response.send_message(
+            return await interaction.followup.send(
                 f"❌ Invalid mutation(s): {', '.join(invalid)}", ephemeral=True
             )
 
@@ -761,7 +763,7 @@ async def add_limited_seed(
     }
 
     mut_display = "All mutations allowed" if mutation_list is None else ", ".join(mutation_list)
-    await interaction.response.send_message(
+    await interaction.followup.send(
         f"✅ Limited seed **{normalized_name}** added for {duration_minutes} minutes.\n"
         f"🔁 Mutations: {mut_display}"
     )
@@ -841,12 +843,12 @@ async def inventory(interaction: discord.Interaction):
         embed.set_footer(text=f"🎉 New achievements: {', '.join(new_achievements)}")
     
     view = InventoryView(interaction.user.id)
-    await interaction.response.send_message(embed=embed, view=view)
+    await interaction.followup.send(embed=embed, view=view)
 
 @tree.command(name="sheckles")
 async def check_sheckles(interaction: discord.Interaction):
     sheckles = user_sheckles.get(interaction.user.id, 0)
-    await interaction.response.send_message(f"💰 You have {sheckles} sheckles.")
+    await interaction.followup.send(f"💰 You have {sheckles} sheckles.")
 
 @tree.command(name="closest_quest")
 async def closest_quest(interaction: discord.Interaction):
@@ -858,18 +860,18 @@ async def closest_quest(interaction: discord.Interaction):
             closest = (name, quest - count)
             diff = quest - count
     msg = f"Closest quest seed: {closest[0]} ({closest[1]} messages left)" if closest else "You have completed all quests!"
-    await interaction.response.send_message(msg)
+    await interaction.followup.send(msg)
 
 @tree.command(name="give_seed")
 @app_commands.describe(user="User to give seed to", seed="Seed name")
 async def give_seed(interaction: discord.Interaction, user: discord.Member, seed: str):
     if not has_admin_role(interaction.user):
-        return await interaction.response.send_message("❌ Not allowed", ephemeral=True)
+        return await interaction.followup.send("❌ Not allowed", ephemeral=True)
 
     base, mut, seed = normalize_seed_name(seed)
 
     if base not in seeds and base not in limited_seeds:
-        return await interaction.response.send_message("❌ Invalid seed name.", ephemeral=True)
+        return await interaction.followup.send("❌ Invalid seed name.", ephemeral=True)
 
     # Calculate grow time with modifiers
     grow_time = calculate_grow_time(base, interaction.user.id)
@@ -893,15 +895,15 @@ async def give_seed(interaction: discord.Interaction, user: discord.Member, seed
     )
     
     user_inventory[user.id]["growing"].append(seed_obj)
-    await interaction.response.send_message(f"✅ Gave {pretty_seed(seed_obj)} to {user.mention}")
+    await interaction.followup.send(f"✅ Gave {pretty_seed(seed_obj)} to {user.mention}")
 
 @tree.command(name="give_sheckles")
 @app_commands.describe(user="User to give sheckles to", amount="Amount of sheckles")
 async def give_sheckles(interaction: discord.Interaction, user: discord.Member, amount: int):
     if not has_admin_role(interaction.user):
-        return await interaction.response.send_message("❌ Not allowed", ephemeral=True)
+        return await interaction.followup.send("❌ Not allowed", ephemeral=True)
     user_sheckles[user.id] += amount
-    await interaction.response.send_message(f"✅ Gave {amount} sheckles to {user.mention}")
+    await interaction.followup.send(f"✅ Gave {amount} sheckles to {user.mention}")
 
 @tree.command(name="buy_seed")
 @app_commands.describe(seed="Seed name to purchase")
@@ -909,15 +911,15 @@ async def buy_seed(interaction: discord.Interaction, seed: str):
     base, mut, seed = normalize_seed_name(seed)
 
     if base not in current_stock and base not in limited_seeds:
-        return await interaction.response.send_message("❌ This seed is not in stock right now!", ephemeral=True)
+        return await interaction.followup.send("❌ This seed is not in stock right now!", ephemeral=True)
 
     if base in seeds:
         sheckles_required, _ = seeds[base]
         if sheckles_required <= 0:
-            return await interaction.response.send_message("❌ This seed is not for sale.", ephemeral=True)
+            return await interaction.followup.send("❌ This seed is not for sale.", ephemeral=True)
 
         if user_sheckles.get(interaction.user.id, 0) < sheckles_required:
-            return await interaction.response.send_message("❌ Not enough sheckles!", ephemeral=True)
+            return await interaction.followup.send("❌ Not enough sheckles!", ephemeral=True)
 
         grow_time = calculate_grow_time(base, interaction.user.id)
         
@@ -940,7 +942,7 @@ async def buy_seed(interaction: discord.Interaction, seed: str):
         new_achievements = check_achievements(interaction.user.id)
         achievement_msg = f"\n🎉 New achievement(s): {', '.join(new_achievements)}" if new_achievements else ""
 
-        return await interaction.response.send_message(
+        return await interaction.followup.send(
             f"✅ Purchased {pretty_seed(seed_obj)} seed for {sheckles_required} sheckles! "
             f"It will be ready in {int(grow_time)} seconds."
             f"{achievement_msg}"
@@ -949,11 +951,11 @@ async def buy_seed(interaction: discord.Interaction, seed: str):
     elif base in limited_seeds:
         seed_data = limited_seeds[base]
         if time.time() > seed_data["expires"]:
-            return await interaction.response.send_message("❌ This limited seed is no longer available.", ephemeral=True)
+            return await interaction.followup.send("❌ This limited seed is no longer available.", ephemeral=True)
 
         sheckles_required = seed_data["sheckles"]
         if user_sheckles.get(interaction.user.id, 0) < sheckles_required:
-            return await interaction.response.send_message("❌ Not enough sheckles!", ephemeral=True)
+            return await interaction.followup.send("❌ Not enough sheckles!", ephemeral=True)
 
         # REMOVED THE QUEST CHECK HERE FOR CONSISTENCY
         # (though you might want to keep it for direct commands)
@@ -976,14 +978,14 @@ async def buy_seed(interaction: discord.Interaction, seed: str):
         new_achievements = check_achievements(interaction.user.id)
         achievement_msg = f"\n🎉 New achievement(s): {', '.join(new_achievements)}" if new_achievements else ""
 
-        return await interaction.response.send_message(
+        return await interaction.followup.send(
             f"✅ Purchased limited {pretty_seed(seed_obj)} seed for {sheckles_required} sheckles! "
             f"It will be ready in {int(grow_time)} seconds."
             f"{achievement_msg}"
         )
 
     else:
-        await interaction.response.send_message(
+        await interaction.followup.send(
             "❌ Seed not found in shop. Use `/shoplist` to see available seeds.", ephemeral=True
         )
 
@@ -1030,15 +1032,15 @@ async def trade_offer(interaction: discord.Interaction, user: discord.Member, yo
     recipient_id = user.id
 
     if recipient_id in trade_offers:
-        return await interaction.response.send_message("❌ That user already has a pending trade offer.", ephemeral=True)
+        return await interaction.followup.send("❌ That user already has a pending trade offer.", ephemeral=True)
 
     sender_seed_obj = find_matching_seed(user_inventory[sender_id]["grown"], yourseed)
     recipient_seed_obj = find_matching_seed(user_inventory[recipient_id]["grown"], theirseed)
 
     if not sender_seed_obj:
-        return await interaction.response.send_message("❌ You don't have that grown seed to offer.", ephemeral=True)
+        return await interaction.followup.send("❌ You don't have that grown seed to offer.", ephemeral=True)
     if not recipient_seed_obj:
-        return await interaction.response.send_message(f"❌ {user.mention} doesn't have that seed or it's still growing.", ephemeral=True)
+        return await interaction.followup.send(f"❌ {user.mention} doesn't have that seed or it's still growing.", ephemeral=True)
 
     # Store the trade offer
     trade_offers[recipient_id] = {
@@ -1064,7 +1066,7 @@ async def trade_offer(interaction: discord.Interaction, user: discord.Member, yo
     
     view = TradeView(interaction.user, user, sender_seed_obj, recipient_seed_obj)
     
-    await interaction.response.send_message(
+    await interaction.followup.send(
         f"{user.mention}, you received a trade offer from {interaction.user.mention}!",
         embed=embed,
         view=view
@@ -1086,7 +1088,7 @@ async def trade_offer(interaction: discord.Interaction, user: discord.Member, yo
 async def view_trade_offers(interaction: discord.Interaction):
     offer = trade_offers.get(interaction.user.id)
     if not offer:
-        return await interaction.response.send_message("📭 You have no pending trade offers.", ephemeral=True)
+        return await interaction.followup.send("📭 You have no pending trade offers.", ephemeral=True)
 
     sender = await bot.fetch_user(offer["sender_id"])
 
@@ -1108,14 +1110,14 @@ async def view_trade_offers(interaction: discord.Interaction):
         f"Check the trade message to accept/decline!"
     )
 
-    await interaction.response.send_message(msg, ephemeral=True)
+    await interaction.followup.send(msg, ephemeral=True)
 
 @tree.command(name="trade_logs")
 async def trade_logs_command(interaction: discord.Interaction):
     if not has_admin_role(interaction.user):
-        return await interaction.response.send_message("❌ Admins only.", ephemeral=True)
+        return await interaction.followup.send("❌ Admins only.", ephemeral=True)
     if not trade_logs:
-        return await interaction.response.send_message("📭 No trade logs available.", ephemeral=True)
+        return await interaction.followup.send("📭 No trade logs available.", ephemeral=True)
 
     embed = discord.Embed(title="📜 Recent Trade Logs", color=discord.Color.gold())
     for log in trade_logs[-10:][::-1]:
@@ -1127,7 +1129,7 @@ async def trade_logs_command(interaction: discord.Interaction):
             value=f"{from_user.name} gave {log['gave']}, got {log['got']}",
             inline=False
         )
-    await interaction.response.send_message(embed=embed, ephemeral=True)
+    await interaction.followup.send(embed=embed, ephemeral=True)
 
 @tree.command(name="shop")
 async def shoplist(interaction: discord.Interaction):
@@ -1148,7 +1150,7 @@ async def shoplist(interaction: discord.Interaction):
     
     # Send the view with dropdown - pass limited_seeds directly (it's already a dict)
     view = SeedShopView(current_stock, limited_seeds, fertilizers)
-    await interaction.response.send_message(embed=embed, view=view)
+    await interaction.followup.send(embed=embed, view=view)
 
 @tree.command(name="sell_seed")
 @app_commands.describe(seed="Seed name", seed_type="Seed state")
@@ -1187,7 +1189,7 @@ async def sell_seed(interaction: discord.Interaction, seed: str, seed_type: app_
         seed_list = [s for s in inv["grown"] if s.name.lower() == base.lower()]
     
     if not seed_list or base not in base_prices:
-        return await interaction.response.send_message("❌ Invalid seed or type", ephemeral=True)
+        return await interaction.followup.send("❌ Invalid seed or type", ephemeral=True)
     
     # Calculate price with mutation
     base_price = base_prices[base]
@@ -1218,7 +1220,7 @@ async def sell_seed(interaction: discord.Interaction, seed: str, seed_type: app_
         msg += " 🌟(Limited)"
     msg += f" for {price} sheckles!"
     
-    await interaction.response.send_message(msg, ephemeral=True)
+    await interaction.followup.send(msg, ephemeral=True)
 
 
 def update_growing_seeds(user_id):
@@ -1281,15 +1283,15 @@ async def refresh_stock():
 @tree.command(name="refresh_stock")
 async def manual_refresh(interaction: discord.Interaction):
     if not has_admin_role(interaction.user):
-        return await interaction.response.send_message("❌ Not allowed", ephemeral=True)
+        return await interaction.followup.send("❌ Not allowed", ephemeral=True)
     refresh_stock.restart()
-    await interaction.response.send_message("🔁 Stock refreshed!", ephemeral=True)
+    await interaction.followup.send("🔁 Stock refreshed!", ephemeral=True)
 
 @tree.command(name="growinstant")
 @app_commands.describe(user="User whose plant to instantly grow", plant="Plant name")
 async def growinstant(interaction: discord.Interaction, user: discord.Member, plant: str):
     if not has_admin_role(interaction.user):
-        return await interaction.response.send_message("❌ Not allowed", ephemeral=True)
+        return await interaction.followup.send("❌ Not allowed", ephemeral=True)
 
     base, mut, _ = normalize_seed_name(plant)
     update_growing_seeds(user.id)
@@ -1298,7 +1300,7 @@ async def growinstant(interaction: discord.Interaction, user: discord.Member, pl
     match = next((s for s in growing if s.name == base and (mut is None or s.mutation == mut)), None)
 
     if not match:
-        return await interaction.response.send_message(f"❌ No matching growing seed found for {user.mention}.", ephemeral=True)
+        return await interaction.followup.send(f"❌ No matching growing seed found for {user.mention}.", ephemeral=True)
 
     # Preserve the limited status when moving to grown
     grown_seed = GrowingSeed(
@@ -1311,7 +1313,7 @@ async def growinstant(interaction: discord.Interaction, user: discord.Member, pl
     growing.remove(match)
     user_inventory[user.id]["grown"].append(grown_seed)
 
-    await interaction.response.send_message(f"🌱 Instantly grew {pretty_seed(grown_seed)} for {user.mention}.", ephemeral=True)
+    await interaction.followup.send(f"🌱 Instantly grew {pretty_seed(grown_seed)} for {user.mention}.", ephemeral=True)
 
 @tasks.loop(hours=24)
 async def rotate_seasons():
@@ -1358,15 +1360,15 @@ async def check_plant_events():
 async def buy_fertilizer(interaction: discord.Interaction, fertilizer: str):
     fert = fertilizers.get(fertilizer.title())
     if not fert:
-        return await interaction.response.send_message("❌ Invalid fertilizer", ephemeral=True)
+        return await interaction.followup.send("❌ Invalid fertilizer", ephemeral=True)
     
     if user_sheckles.get(interaction.user.id, 0) < fert["cost"]:
-        return await interaction.response.send_message("❌ Not enough sheckles", ephemeral=True)
+        return await interaction.followup.send("❌ Not enough sheckles", ephemeral=True)
     
     user_sheckles[interaction.user.id] -= fert["cost"]
     user_fertilizers[interaction.user.id][fertilizer.title()] += 1
     
-    await interaction.response.send_message(
+    await interaction.followup.send(
         f"✅ Purchased {fertilizer.title()} for {fert['cost']} sheckles! "
         f"Use `/use_fertilizer {fertilizer.title()}` to activate it."
     )
@@ -1377,7 +1379,7 @@ async def buy_fertilizer(interaction: discord.Interaction, fertilizer: str):
 async def use_fertilizer(interaction: discord.Interaction, fertilizer: str):
     fert_name = fertilizer.title()
     if user_fertilizers[interaction.user.id].get(fert_name, 0) < 1:
-        return await interaction.response.send_message("❌ You don't have this fertilizer", ephemeral=True)
+        return await interaction.followup.send("❌ You don't have this fertilizer", ephemeral=True)
     
     fert = fertilizers[fert_name]
     user_fertilizers[interaction.user.id][fert_name] -= 1
@@ -1386,7 +1388,7 @@ async def use_fertilizer(interaction: discord.Interaction, fertilizer: str):
         "multiplier": fert["effect"]["multiplier"]
     }
     
-    await interaction.response.send_message(
+    await interaction.followup.send(
         f"🌱 Activated {fert_name}! Effect will last for {fert['effect']['duration']//3600} hours."
     )
 
@@ -1445,7 +1447,7 @@ async def shovel(
         ])
     
     if not matches:
-        return await interaction.response.send_message(
+        return await interaction.followup.send(
             f"❌ No matching plants found in your {'garden' if plant_type is None else plant_type.name.lower()}.",
             ephemeral=True
         )
@@ -1453,7 +1455,7 @@ async def shovel(
     # Handle quantity
     if quantity > 0:
         if quantity > len(matches):
-            return await interaction.response.send_message(
+            return await interaction.followup.send(
                 f"❌ You only have {len(matches)} of those plants!",
                 ephemeral=True
             )
@@ -1481,7 +1483,7 @@ async def shovel(
         )
         
         view = ShovelConfirmView(base_name, plant_type.value if plant_type else "both", limited_count > 0, mutated_count > 0)
-        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+        await interaction.followup.send(embed=embed, view=view, ephemeral=True)
         await view.wait()
         
         if not view.confirmed:
@@ -1545,7 +1547,7 @@ async def shovel(
         if needs_confirmation:
             await interaction.followup.send(embed=embed, ephemeral=True)
         else:
-            await interaction.response.send_message(embed=embed, ephemeral=True)
+            await interaction.followup.send(embed=embed, ephemeral=True)
     except discord.errors.NotFound:
         # Fallback if the interaction expired
         try:
