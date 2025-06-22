@@ -371,9 +371,10 @@ class InventoryView(View):
         inv = user_inventory[interaction.user.id]
         grown_list = [pretty_seed(seed) for seed in inv["grown"]]
         growing_list = [
-            f"{pretty_seed(seed)} [{max(0, int(seed.finish_time - time.time()))}s]"
+            f"{pretty_seed(seed)} {growth_progress_bar(seed, use_emojis=True)}"
             for seed in inv["growing"]
         ]
+
         
         embed = discord.Embed(title="🌱 Your Garden (Refreshed)", color=discord.Color.green())
         embed.add_field(name="🌾 Growing", value='\n'.join(growing_list) or "None", inline=False)
@@ -406,9 +407,10 @@ class InventorySelect(Select):
         
         if selection == "growing":
             growing_list = [
-                f"{pretty_seed(seed)} [{max(0, int(seed.finish_time - time.time()))}s]" 
+                f"{pretty_seed(seed)} {growth_progress_bar(seed, use_emojis=True)}"
                 for seed in inv["growing"]
             ]
+
             embed = discord.Embed(title="🌾 Growing Plants", description='\n'.join(growing_list) or "None", color=discord.Color.green())
         elif selection == "grown":
             grown_list = [pretty_seed(seed) for seed in inv["grown"]]
@@ -940,6 +942,32 @@ def pretty_seed(seed_obj):
     if getattr(seed_obj, "limited", False):
         name += " 🌟(Limited)"
     return name
+
+def growth_progress_bar(seed, bar_length=10, use_emojis=False):
+    total_time = seed.finish_time - getattr(seed, "start_time", seed.finish_time - 300)
+    elapsed = time.time() - (seed.finish_time - total_time)
+    percent = min(1.0, max(0.0, elapsed / total_time))
+    
+    filled = int(bar_length * percent)
+    empty = bar_length - filled
+
+    if use_emojis:
+        bar = "🌱" * filled + "▫️" * empty
+    else:
+        bar = "▓" * filled + "░" * empty
+    
+    percent_display = int(percent * 100)
+    return f"[{bar}] {percent_display}%"
+
+def get_growth_color(seed):
+    total_time = seed.finish_time - getattr(seed, "start_time", seed.finish_time - 300)
+    elapsed = time.time() - (seed.finish_time - total_time)
+    percent = min(1.0, max(0.0, elapsed / total_time))
+
+    # Green (ready) → Yellow (mid) → Red (just started)
+    red = int(255 * (1 - percent))
+    green = int(255 * percent)
+    return discord.Color.from_rgb(red, green, 50)
 
 def normalize_seed_name(raw: str):
     """
