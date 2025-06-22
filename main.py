@@ -174,6 +174,26 @@ limited_seeds = {}
 trade_offers = {}  # user_id -> dict with keys: sender_id, seed_name, timestamp
 trade_logs = []
 
+class ShovelConfirmView(discord.ui.View):
+    def __init__(self, plant_name, plant_type, is_limited, is_mutated):
+        super().__init__(timeout=60)
+        self.plant_name = plant_name
+        self.plant_type = plant_type
+        self.is_limited = is_limited
+        self.is_mutated = is_mutated
+        self.confirmed = False
+
+    @discord.ui.button(label="Confirm", style=discord.ButtonStyle.danger)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.confirmed = True
+        self.stop()
+        await interaction.response.defer()
+        
+    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.stop()
+        await interaction.response.send_message("🚫 Removal cancelled.", ephemeral=True)
+
 class Giveaway:
     def __init__(self, hoster, prize, winners, number_range, target, duration, channel):
         self.hoster = hoster
@@ -1124,6 +1144,135 @@ async def use_fertilizer(interaction: discord.Interaction, fertilizer: str):
     await interaction.response.send_message(
         f"🌱 Activated {fert_name}! Effect will last for {fert['effect']['duration']//3600} hours."
     )
+
+@tree.command(name="shovel")
+@app_commands.describe(
+    plant="Plant to remove (name or 'all')",
+    plant_type="Type of plant to remove",
+    force="Skip confirmation (admin only)"
+)
+@app_commands.choices(plant_type=[
+    app_commands.Choice(name="Growing", value="growing"),
+    app_commands.Choice(name="Grown", value="grown"),
+    app_commands.Choice(name="Both", value="both")
+])
+async def shovel(
+    interaction: discord.Interaction,
+    plant: Optional[str] = None,
+    plant_type: Optional[app_commands.Choice[str]] = None,
+    force: bool = False
+):
+    """Remove plants from your garden with confirmation"""
+    update_growing_seeds(interaction.user.id)
+    
+    if plant is None:
+        return await inventory(interaction)
+    
+    base_name, mut, _ = normalize_seed_name(plant)
+    inv = user_inventory[interaction.user.id]
+    
+    # Find matching plants
+    matches = []
+    check_growing = plant_type is None or plant_type.value in ["growing", "both"]
+    check_grown = plant_type is None or plant_type.value in ["grown", "both"]
+    
+    if check_growing:
+        matches.extend([
+            p for p in inv["growing"]
+            if (base_name.lower() == "all" or p.name.lower() == base_name.lower()) and
+               (mut is None or (p.mutation and p.mutation.lower() == mut.lower()))
+        ])
+    
+    if check_grown:
+        matches.extend([
+            p for p in inv["grown"]
+            if (base_name.lower() == "all" or p.name.lower() == base_name.lower()) and
+               (mut is None or (p.mutation and p.mutation.lower() == mut.lower()))
+        ])
+    
+    if not matches:
+        return await interaction.response.send_message(
+            f"❌ No matching plants found in your {'garden' if plant_type is None else plant_type.name.lower()}.",
+            ephemeral=True
+        )
+    
+    # Check for special plants needing confirmation
+    needs_confirmation = any(
+        getattr(p, "limited", False) or p.mutation 
+        for p in matches
+    ) and not (force and has_admin_role(interaction.user))
+    
+    if needs_confirmation:
+        limited_count = sum(1 for p in matches if getattr(p, "limited", False))
+        mutated_count = sum(1 for p in matches if p.mutation)
+        
+        embed = discord.Embed(
+            title="⚠️ Confirm Special Plant Removal",
+            color=discord.Color.orange()
+        )
+        embed.description = (
+            f"You're about to remove {len(matches)} plants:\n"
+            f"• {limited_count} limited edition 🌟\n"
+            f"• {mutated_count} mutated 🔄\n\n"
+            "**These cannot be recovered!**"
+        )
+        
+        view = ShovelConfirmView(base_name, plant_type.value if plant_type else "both", limited_count > 0, mutated_count > 0)
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+        await view.wait()
+        
+        if not view.confirmed:
+            return  # Already handled in the view
+        
+    # Perform removal
+    if check_growing:
+        inv["growing"] = [
+            p for p in inv["growing"]
+            if not (base_name.lower() == "all" or p.name.lower() == base_name.lower()) or
+               (mut is not None and (not p.mutation or p.mutation.lower() != mut.lower()))
+        ]
+    
+    if check_grown:
+        inv["grown"] = [
+            p for p in inv["grown"]
+            if not (base_name.lower() == "all" or p.name.lower() == base_name.lower()) or
+               (mut is not None and (not p.mutation or p.mutation.lower() != mut.lower()))
+        ]
+    
+    # Build result embed
+    embed = discord.Embed(
+        title="🪴 Shovel Results",
+        color=discord.Color.green()
+    )
+    
+    removed_counts = {
+        "normal": 0,
+        "mutated": 0,
+        "limited": 0
+    }
+    
+    for p in matches:
+        if getattr(p, "limited", False):
+            removed_counts["limited"] += 1
+        elif p.mutation:
+            removed_counts["mutated"] += 1
+        else:
+            removed_counts["normal"] += 1
+    
+    embed.add_field(
+        name="Removed Plants",
+        value=(
+            f"• {removed_counts['normal']} normal\n"
+            f"• {removed_counts['mutated']} mutated\n"
+            f"• {removed_counts['limited']} limited 🌟"
+        ),
+        inline=False
+    )
+    
+    if removed_counts["limited"] > 0 or removed_counts["mutated"] > 0:
+        embed.set_footer(text="⚠️ Limited and mutated plants cannot be recovered!")
+    
+    await interaction.followup.send(embed=embed, ephemeral=True)
 
 @bot.event
 async def on_message(message):
