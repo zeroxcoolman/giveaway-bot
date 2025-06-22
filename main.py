@@ -484,11 +484,7 @@ class SeedSelect(Select):
             if time.time() > seed_data["expires"]:
                 return await interaction.response.send_message("❌ This limited seed has expired.", ephemeral=True)
                 
-            if seed_data["quest"] > 0 and user_message_counts.get(user_id, 0) < seed_data["quest"]:
-                return await interaction.response.send_message(
-                    f"❌ You need to send {seed_data['quest']} messages to unlock this seed!", ephemeral=True
-                )
-            
+            # REMOVED THE QUEST CHECK HERE
             allowed_mutations = seed_data.get("mutations")
         else:
             if seed_name not in seeds:
@@ -497,14 +493,11 @@ class SeedSelect(Select):
             sheckles_required, quest = seeds[seed_name]
             allowed_mutations = None
             
-            if quest > 0 and user_message_counts.get(user_id, 0) < quest:
-                return await interaction.response.send_message(
-                    f"❌ You need to send {quest} messages to unlock this seed!", ephemeral=True
-                )
-
+            # REMOVED THE QUEST CHECK HERE
+    
         if user_sheckles.get(user_id, 0) < sheckles_required:
             return await interaction.response.send_message("❌ Not enough sheckles!", ephemeral=True)
-
+    
         grow_time = calculate_grow_time(base, user_id)
         
         # Check for active mutation boost
@@ -520,10 +513,10 @@ class SeedSelect(Select):
             allowed_mutations=allowed_mutations
         )
         user_inventory[user_id]["growing"].append(seed_obj)
-
+    
         new_achievements = check_achievements(user_id)
         achievement_msg = f"\n🎉 New achievement(s): {', '.join(new_achievements)}" if new_achievements else ""
-
+    
         await interaction.response.send_message(
             f"✅ Purchased {'limited ' if is_limited else ''}{pretty_seed(seed_obj)} seed for {sheckles_required} sheckles! "
             f"It will be ready in {int(grow_time)} seconds."
@@ -531,6 +524,7 @@ class SeedSelect(Select):
             ephemeral=True
         )
 
+    
     async def handle_fertilizer_purchase(self, interaction: discord.Interaction, fert_name: str):
         fert = fertilizers.get(fert_name)
         if not fert:
@@ -939,7 +933,6 @@ async def buy_seed(interaction: discord.Interaction, seed: str):
         new_achievements = check_achievements(interaction.user.id)
         achievement_msg = f"\n🎉 New achievement(s): {', '.join(new_achievements)}" if new_achievements else ""
 
-        # FIXED: Simplified time display - just show grow_time directly
         return await interaction.response.send_message(
             f"✅ Purchased {pretty_seed(seed_obj)} seed for {sheckles_required} sheckles! "
             f"It will be ready in {int(grow_time)} seconds."
@@ -955,10 +948,8 @@ async def buy_seed(interaction: discord.Interaction, seed: str):
         if user_sheckles.get(interaction.user.id, 0) < sheckles_required:
             return await interaction.response.send_message("❌ Not enough sheckles!", ephemeral=True)
 
-        if seed_data["quest"] > 0 and user_message_counts.get(interaction.user.id, 0) < seed_data["quest"]:
-            return await interaction.response.send_message(
-                f"❌ You need to send {seed_data['quest']} messages to unlock this seed!", ephemeral=True
-            )
+        # REMOVED THE QUEST CHECK HERE FOR CONSISTENCY
+        # (though you might want to keep it for direct commands)
 
         grow_time = calculate_grow_time(base, interaction.user.id)
         allowed_mutations = seed_data.get("mutations")
@@ -978,7 +969,6 @@ async def buy_seed(interaction: discord.Interaction, seed: str):
         new_achievements = check_achievements(interaction.user.id)
         achievement_msg = f"\n🎉 New achievement(s): {', '.join(new_achievements)}" if new_achievements else ""
 
-        # FIXED: Simplified time display here too
         return await interaction.response.send_message(
             f"✅ Purchased limited {pretty_seed(seed_obj)} seed for {sheckles_required} sheckles! "
             f"It will be ready in {int(grow_time)} seconds."
