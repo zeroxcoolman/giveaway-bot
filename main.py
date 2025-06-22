@@ -35,21 +35,6 @@ user_fertilizers = defaultdict(lambda: defaultdict(int))  # user_id -> {fertiliz
 user_active_boosts = defaultdict(dict)  # user_id -> {boost_type: {expires: timestamp, multiplier: float}}
 YOUR_ANNOUNCEMENT_CHANNEL_ID = 1386095247997665521
 
-def init_db():
-    conn = sqlite3.connect('bot_data.db')
-    c = conn.cursor()
-    
-    # Create tables
-    c.execute('''CREATE TABLE IF NOT EXISTS users 
-                 (user_id INTEGER PRIMARY KEY, sheckles INTEGER, messages INTEGER)''')
-    c.execute('''CREATE TABLE IF NOT EXISTS inventory
-                 (user_id INTEGER, seed_name TEXT, mutation TEXT, 
-                  limited BOOLEAN, finish_time REAL, is_growing BOOLEAN)''')
-    # Add other tables as needed
-    conn.commit()
-    conn.close()
-
-init_db()  # Call this at startup
 
 fertilizers = {
     "Growth Boost": {
