@@ -804,7 +804,7 @@ async def start_giveaway(interaction: discord.Interaction, winners: int, prize: 
     )
     
     view = GiveawayView(giveaway)
-    await interaction.followup.send(embed=embed, view=view)
+    await interaction.edit_original_response(embed=embed, view=view)
 
     if duration > 0:
         giveaway.task = asyncio.create_task(schedule_giveaway_end(giveaway))
@@ -827,27 +827,35 @@ async def stop_giveaway(interaction: discord.Interaction):
 
 @tree.command(name="inventory")
 async def inventory(interaction: discord.Interaction):
-    """View your inventory with interactive controls"""
-    update_growing_seeds(interaction.user.id)
-    new_achievements = check_achievements(interaction.user.id)
-    
-    inv = user_inventory[interaction.user.id]
-    grown_list = [pretty_seed(seed) for seed in inv["grown"]]
-    growing_list = [
-        f"{pretty_seed(seed)} [{max(0, int(seed.finish_time - time.time()))}s]" 
-        for seed in inv["growing"]
-    ]
-    
-    embed = discord.Embed(title="🌱 Your Garden", color=discord.Color.green())
-    embed.add_field(name="🌾 Growing", value='\n'.join(growing_list) or "None", inline=False)
-    embed.add_field(name="🥕 Grown", value='\n'.join(grown_list) or "None", inline=False)
-    embed.add_field(name="💰 Sheckles", value=str(user_sheckles.get(interaction.user.id, 0)), inline=False)
-    
-    if new_achievements:
-        embed.set_footer(text=f"🎉 New achievements: {', '.join(new_achievements)}")
-    
-    view = InventoryView(interaction.user.id)
-    await interaction.followup.send(embed=embed, view=view)
+    try:
+        """View your inventory with interactive controls"""
+        await interaction.response.defer()
+        update_growing_seeds(interaction.user.id)
+        new_achievements = check_achievements(interaction.user.id)
+        
+        inv = user_inventory[interaction.user.id]
+        grown_list = [pretty_seed(seed) for seed in inv["grown"]]
+        growing_list = [
+            f"{pretty_seed(seed)} [{max(0, int(seed.finish_time - time.time()))}s]" 
+            for seed in inv["growing"]
+        ]
+        
+        embed = discord.Embed(title="🌱 Your Garden", color=discord.Color.green())
+        embed.add_field(name="🌾 Growing", value='\n'.join(growing_list) or "None", inline=False)
+        embed.add_field(name="🥕 Grown", value='\n'.join(grown_list) or "None", inline=False)
+        embed.add_field(name="💰 Sheckles", value=str(user_sheckles.get(interaction.user.id, 0)), inline=False)
+        
+        if new_achievements:
+            embed.set_footer(text=f"🎉 New achievements: {', '.join(new_achievements)}")
+        
+        view = InventoryView(interaction.user.id)
+        await interaction.edit_original_response(embed=embed, view=view)
+    except Exception as e:
+        print(f"Error in inventory command: {e}")
+        try:
+            await interaction.followup.send("❌ An error occurred while loading your inventory.", ephemeral=True)
+        except:
+            pass  # If we can't even send an error message
 
 @tree.command(name="sheckles")
 async def check_sheckles(interaction: discord.Interaction):
@@ -1154,7 +1162,7 @@ async def shoplist(interaction: discord.Interaction):
     
     # Send the view with dropdown - pass limited_seeds directly (it's already a dict)
     view = SeedShopView(current_stock, limited_seeds, fertilizers)
-    await interaction.followup.send(embed=embed, view=view)
+    await interaction.edit_original_response(embed=embed, view=view)
 
 @tree.command(name="sell_seed")
 @app_commands.describe(seed="Seed name", seed_type="Seed state")
