@@ -1255,7 +1255,7 @@ async def growinstant(interaction: discord.Interaction, user: discord.Member, pl
     # Preserve the limited status when moving to grown
     grown_seed = GrowingSeed(
         match.name,
-        time.time(),  # Instant grow
+        0,  # Instant grow
         mutation=match.mutation,
         limited=getattr(match, "limited", False)  # <-- Preserve limited status
     )
