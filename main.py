@@ -1033,6 +1033,17 @@ async def trade_offer(interaction: discord.Interaction, user: discord.Member, yo
         view=view
     )
 
+    try:
+        await user.send(
+            f"You received a trade offer from {interaction.user.mention}!\n"
+            f"They're offering: {pretty_seed(sender_seed_obj)}\n"
+            f"They want: {pretty_seed(recipient_seed_obj)}\n"
+            f"Check {interaction.channel.mention} to respond!"
+        )
+    except discord.Forbidden:
+        pass  # User has DMs disabled
+
+
 
 @tree.command(name="trade_offers")
 async def view_trade_offers(interaction: discord.Interaction):
