@@ -424,6 +424,10 @@ class SeedShopView(View):
 
 class SeedSelect(Select):
     def __init__(self, regular_seeds, limited_seeds, fertilizers):
+        self.regular_seeds = regular_seeds  # Store these as instance attributes
+        self.limited_seeds = limited_seeds
+        self.fertilizers = fertilizers
+        
         options = []
         
         # Add regular seeds
@@ -433,16 +437,16 @@ class SeedSelect(Select):
             options.append(discord.SelectOption(
                 label=f"{seed} - {cost} sheckles",
                 description=f"{rarity} | Quest: {quest} messages",
-                value=f"seed_{seed}_{random.randint(0, 99999)}"  # Add random number to make value unique
+                value=f"seed_{seed}_{random.randint(0, 99999)}"
             ))
         
-        # Add limited seeds - limited_seeds is now a dictionary
+        # Add limited seeds
         for name, data in limited_seeds.items():
             time_left = max(0, int((data["expires"] - time.time()) // 60))
             options.append(discord.SelectOption(
                 label=f"🌟 {name} - {data['sheckles']} sheckles",
                 description=f"Limited | {time_left}min left | Quest: {data['quest']}",
-                value=f"limited_{name}_{random.randint(0, 99999)}"  # Add random number to make value unique
+                value=f"limited_{name}_{random.randint(0, 99999)}"
             ))
         
         # Add fertilizers
@@ -450,7 +454,7 @@ class SeedSelect(Select):
             options.append(discord.SelectOption(
                 label=f"🧪 {name} - {data['cost']} sheckles",
                 description=data["description"],
-                value=f"fert_{name}_{random.randint(0, 99999)}"  # Add random number to make value unique
+                value=f"fert_{name}_{random.randint(0, 99999)}"
             ))
         
         super().__init__(
