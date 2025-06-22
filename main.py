@@ -8,6 +8,8 @@ import random
 import time
 from collections import defaultdict
 from typing import Optional
+from discord.ui import Select, Button, View
+from discord import ButtonStyle
 
 intents = discord.Intents.default()
 intents.messages = True
@@ -173,6 +175,284 @@ limited_seeds = {}
 
 trade_offers = {}  # user_id -> dict with keys: sender_id, seed_name, timestamp
 trade_logs = []
+
+class TradeView(View):
+    def __init__(self, sender, recipient, sender_seed, recipient_seed):
+        super().__init__(timeout=300)  # 5 minute timeout
+        self.sender = sender
+        self.recipient = recipient
+        self.sender_seed = sender_seed
+        self.recipient_seed = recipient_seed
+    
+    @discord.ui.button(label="Accept Trade", style=ButtonStyle.green)
+    async def accept(self, interaction: discord.Interaction, button: Button):
+        if interaction.user.id != self.recipient.id:
+            return await interaction.response.send_message("❌ This trade isn't for you!", ephemeral=True)
+        
+        # Perform the trade
+        update_growing_seeds(self.sender.id)
+        update_growing_seeds(self.recipient.id)
+        
+        sender_grown = user_inventory[self.sender.id]["grown"]
+        recipient_grown = user_inventory[self.recipient.id]["grown"]
+        
+        # Find exact seeds
+        sender_seed = next((s for s in sender_grown if s.name == self.sender_seed.name and s.mutation == self.sender_seed.mutation), None)
+        recipient_seed = next((s for s in recipient_grown if s.name == self.recipient_seed.name and s.mutation == self.recipient_seed.mutation), None)
+        
+        if not sender_seed or not recipient_seed:
+            trade_offers.pop(self.recipient.id, None)
+            return await interaction.response.send_message("❌ One or both seeds no longer available.", ephemeral=True)
+        
+        # Perform swap
+        sender_grown.remove(sender_seed)
+        recipient_grown.remove(recipient_seed)
+        sender_grown.append(recipient_seed)
+        recipient_grown.append(sender_seed)
+        
+        trade_logs.append({
+            "from": self.sender.id,
+            "to": self.recipient.id,
+            "gave": sender_seed.name,
+            "got": recipient_seed.name,
+            "time": time.time()
+        })
+        
+        trade_offers.pop(self.recipient.id, None)
+        
+        # Update the message
+        embed = discord.Embed(
+            title="✅ Trade Completed",
+            description=(
+                f"{self.sender.mention} gave {pretty_seed(sender_seed)}\n"
+                f"{self.recipient.mention} gave {pretty_seed(recipient_seed)}"
+            ),
+            color=discord.Color.green()
+        )
+        
+        self.accept.disabled = True
+        self.decline.disabled = True
+        await interaction.response.edit_message(embed=embed, view=self)
+        
+        # Notify both parties
+        try:
+            await self.sender.send(
+                f"✅ Your trade with {self.recipient.mention} was accepted!\n"
+                f"You received: {pretty_seed(recipient_seed)}\n"
+                f"You gave: {pretty_seed(sender_seed)}"
+            )
+        except:
+            pass
+
+class GiveawayView(View):
+    def __init__(self, giveaway):
+        super().__init__(timeout=None)  # Persistent view
+        self.giveaway = giveaway
+    
+    @discord.ui.button(label="Join Giveaway", style=ButtonStyle.green, custom_id="join_giveaway")
+    async def join_giveaway(self, interaction: discord.Interaction, button: Button):
+        if interaction.channel.id != self.giveaway.channel.id:
+            return await interaction.response.send_message("❌ This button only works in the giveaway channel!", ephemeral=True)
+        
+        await interaction.response.send_modal(GuessModal(self.giveaway))
+
+class GuessModal(discord.ui.Modal):
+    def __init__(self, giveaway):
+        super().__init__(title="Enter Your Guess")
+        self.giveaway = giveaway
+        self.guess = discord.ui.TextInput(
+            label=f"Guess a number between {self.giveaway.low}-{self.giveaway.high}",
+            placeholder="Enter your guess here...",
+            min_length=1,
+            max_length=10
+        )
+        self.add_item(self.guess)
+    
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            guess = int(self.guess.value)
+            if guess < self.giveaway.low or guess > self.giveaway.high:
+                return await interaction.response.send_message(
+                    f"❌ Guess must be between {self.giveaway.low} and {self.giveaway.high}!",
+                    ephemeral=True
+                )
+            
+            correct = self.giveaway.check_guess(interaction.user, guess)
+            if correct is None:
+                return
+            
+            if correct:
+                self.giveaway.winners.add(interaction.user)
+                if len(self.giveaway.winners) >= self.giveaway.winners_required:
+                    await end_giveaway(self.giveaway)
+                else:
+                    await interaction.response.send_message(
+                        "🎉 Correct guess! You're a winner!",
+                        ephemeral=True
+                    )
+            else:
+                await interaction.response.send_message(
+                    "❌ Incorrect guess, try again!",
+                    ephemeral=True
+                )
+        except ValueError:
+            await interaction.response.send_message(
+                "❌ Please enter a valid number!",
+                ephemeral=True
+            )
+
+class ConfirmView(View):
+    def __init__(self):
+        super().__init__(timeout=60)
+        self.value = None
+    
+    @discord.ui.button(label="Confirm", style=ButtonStyle.green)
+    async def confirm(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.defer()
+        self.value = True
+        self.stop()
+    
+    @discord.ui.button(label="Cancel", style=ButtonStyle.red)
+    async def cancel(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.defer()
+        self.value = False
+        self.stop()
+
+class InventoryView(View):
+    def __init__(self, user_id):
+        super().__init__(timeout=120)
+        self.user_id = user_id
+        self.add_item(InventorySelect())
+    
+    @discord.ui.button(label="Refresh", style=ButtonStyle.blurple)
+    async def refresh(self, interaction: discord.Interaction, button: Button):
+        update_growing_seeds(interaction.user.id)
+        new_achievements = check_achievements(interaction.user.id)
+        
+        inv = user_inventory[interaction.user.id]
+        grown_list = [pretty_seed(seed) for seed in inv["grown"]]
+        growing_list = [
+            f"{pretty_seed(seed)} [{int(seed.finish_time - time.time())}s]" 
+            for seed in inv["growing"]
+        ]
+        
+        embed = discord.Embed(title="🌱 Your Garden (Refreshed)", color=discord.Color.green())
+        embed.add_field(name="🌾 Growing", value='\n'.join(growing_list) or "None", inline=False)
+        embed.add_field(name="🥕 Grown", value='\n'.join(grown_list) or "None", inline=False)
+        embed.add_field(name="💰 Sheckles", value=str(user_sheckles.get(interaction.user.id, 0)), inline=False)
+        
+        if new_achievements:
+            embed.set_footer(text=f"🎉 New achievements: {', '.join(new_achievements)}")
+        
+        await interaction.response.edit_message(embed=embed)
+
+class InventorySelect(Select):
+    def __init__(self):
+        options = [
+            discord.SelectOption(label="View Growing Plants", description="See what's currently growing", value="growing"),
+            discord.SelectOption(label="View Grown Plants", description="See your harvested plants", value="grown"),
+            discord.SelectOption(label="View Achievements", description="See your unlocked achievements", value="achievements"),
+            discord.SelectOption(label="View Fertilizers", description="See your fertilizer stock", value="fertilizers")
+        ]
+        super().__init__(
+            placeholder="Select inventory section...",
+            min_values=1,
+            max_values=1,
+            options=options
+        )
+    
+    async def callback(self, interaction: discord.Interaction):
+        selection = self.values[0]
+        inv = user_inventory[interaction.user.id]
+        
+        if selection == "growing":
+            growing_list = [
+                f"{pretty_seed(seed)} [{int(seed.finish_time - time.time())}s]" 
+                for seed in inv["growing"]
+            ]
+            embed = discord.Embed(title="🌾 Growing Plants", description='\n'.join(growing_list) or "None", color=discord.Color.green())
+        elif selection == "grown":
+            grown_list = [pretty_seed(seed) for seed in inv["grown"]]
+            embed = discord.Embed(title="🥕 Grown Plants", description='\n'.join(grown_list) or "None", color=discord.Color.green())
+        elif selection == "achievements":
+            achievements = user_achievements.get(interaction.user.id, [])
+            embed = discord.Embed(title="🏆 Achievements", description='\n'.join(achievements) or "None", color=discord.Color.gold())
+        elif selection == "fertilizers":
+            ferts = [
+                f"{name}: {count}" 
+                for name, count in user_fertilizers[interaction.user.id].items() 
+                if count > 0
+            ]
+            embed = discord.Embed(title="🧪 Fertilizers", description='\n'.join(ferts) or "None", color=discord.Color.blue())
+        
+        await interaction.response.edit_message(embed=embed)
+
+class SeedShopView(View):
+    def __init__(self, regular_seeds, limited_seeds, fertilizers):
+        super().__init__(timeout=120)
+        self.regular_seeds = regular_seeds
+        self.limited_seeds = limited_seeds
+        self.fertilizers = fertilizers
+        self.add_item(SeedSelect(regular_seeds, limited_seeds, fertilizers))
+
+class SeedSelect(Select):
+    def __init__(self, regular_seeds, limited_seeds, fertilizers):
+        options = []
+        
+        # Add regular seeds
+        for seed in regular_seeds:
+            cost, quest = seeds[seed]
+            rarity = SEED_RARITIES.get(seed, "Unknown")
+            options.append(discord.SelectOption(
+                label=f"{seed} - {cost} sheckles",
+                description=f"{rarity} | Quest: {quest} messages",
+                value=f"seed_{seed}"
+            ))
+        
+        # Add limited seeds
+        for name, data in limited_seeds:
+            time_left = max(0, int((data["expires"] - time.time()) // 60))
+            options.append(discord.SelectOption(
+                label=f"🌟 {name} - {data['sheckles']} sheckles",
+                description=f"Limited | {time_left}min left | Quest: {data['quest']}",
+                value=f"limited_{name}"
+            ))
+        
+        # Add fertilizers
+        for name, data in fertilizers.items():
+            options.append(discord.SelectOption(
+                label=f"🧪 {name} - {data['cost']} sheckles",
+                description=data["description"],
+                value=f"fert_{name}"
+            ))
+        
+        super().__init__(
+            placeholder="Select an item to purchase...",
+            min_values=1,
+            max_values=1,
+            options=options
+        )
+    
+    async def callback(self, interaction: discord.Interaction):
+        value = self.values[0]
+        if value.startswith("seed_"):
+            seed = value[5:]
+            await interaction.response.send_message(
+                f"Use `/buy_seed {seed}` to purchase this seed!",
+                ephemeral=True
+            )
+        elif value.startswith("limited_"):
+            seed = value[8:]
+            await interaction.response.send_message(
+                f"Use `/buy_seed {seed}` to purchase this limited seed!",
+                ephemeral=True
+            )
+        elif value.startswith("fert_"):
+            fert = value[5:]
+            await interaction.response.send_message(
+                f"Use `/buy_fertilizer {fert}` to purchase this fertilizer!",
+                ephemeral=True
+            )
 
 class ShovelConfirmView(discord.ui.View):
     def __init__(self, plant_name, plant_type, is_limited, is_mutated):
@@ -435,7 +715,9 @@ async def start_giveaway(interaction: discord.Interaction, winners: int, prize: 
         ),
         color=discord.Color.gold()
     )
-    await interaction.followup.send(embed=embed)
+    
+    view = GiveawayView(giveaway)
+    await interaction.followup.send(embed=embed, view=view)
 
     if duration > 0:
         giveaway.task = asyncio.create_task(schedule_giveaway_end(giveaway))
@@ -458,41 +740,27 @@ async def stop_giveaway(interaction: discord.Interaction):
 
 @tree.command(name="inventory")
 async def inventory(interaction: discord.Interaction):
+    """View your inventory with interactive controls"""
     update_growing_seeds(interaction.user.id)
     new_achievements = check_achievements(interaction.user.id)
-    achievements = user_achievements.get(interaction.user.id, [])
     
     inv = user_inventory[interaction.user.id]
-    
-    # Format inventory items
     grown_list = [pretty_seed(seed) for seed in inv["grown"]]
     growing_list = [
         f"{pretty_seed(seed)} [{int(seed.finish_time - time.time())}s]" 
         for seed in inv["growing"]
     ]
     
-    # Format fertilizers
-    ferts = [
-        f"{name}: {count}" 
-        for name, count in user_fertilizers[interaction.user.id].items() 
-        if count > 0
-    ]
-    
-    embed = discord.Embed(title="🌱 Your Garden & Wallet", color=discord.Color.green())
+    embed = discord.Embed(title="🌱 Your Garden", color=discord.Color.green())
     embed.add_field(name="🌾 Growing", value='\n'.join(growing_list) or "None", inline=False)
     embed.add_field(name="🥕 Grown", value='\n'.join(grown_list) or "None", inline=False)
-    embed.add_field(name="🧪 Fertilizers", value='\n'.join(ferts) or "None", inline=False)
     embed.add_field(name="💰 Sheckles", value=str(user_sheckles.get(interaction.user.id, 0)), inline=False)
-    embed.add_field(
-        name="🏆 Achievements",
-        value='\n'.join(achievements) or "None",
-        inline=False
-    )
-        
+    
     if new_achievements:
         embed.set_footer(text=f"🎉 New achievements: {', '.join(new_achievements)}")
     
-    await interaction.response.send_message(embed=embed)
+    view = InventoryView(interaction.user.id)
+    await interaction.response.send_message(embed=embed, view=view)
 
 @tree.command(name="sheckles")
 async def check_sheckles(interaction: discord.Interaction):
@@ -695,7 +963,7 @@ async def trade_offer(interaction: discord.Interaction, user: discord.Member, yo
     if not recipient_seed_obj:
         return await interaction.response.send_message(f"❌ {user.mention} doesn't have that seed or it's still growing.", ephemeral=True)
 
-    # Store raw data (not pretty printed) for exact match later
+    # Store the trade offer
     trade_offers[recipient_id] = {
         "sender_id": sender_id,
         "sender_seed_name": sender_seed_obj.name,
@@ -705,13 +973,24 @@ async def trade_offer(interaction: discord.Interaction, user: discord.Member, yo
         "timestamp": time.time()
     }
 
-    await interaction.response.send_message(f"✅ Trade offer sent to {user.mention}.", ephemeral=True)
-    try:
-        await user.send(f"🔔 You received a trade offer from {interaction.user.mention}:")
-        await user.send(f"They offer **{pretty_seed(sender_seed_obj)}** for your **{pretty_seed(recipient_seed_obj)}**.")
-        await user.send("Use `/trade_accept @user` or `/trade_decline @user`.")
-    except Exception as e:
-        print("Failed to DM user about trade:", e)
+    # Create an embed for the trade
+    embed = discord.Embed(
+        title="🔔 Trade Offer",
+        description=(
+            f"{interaction.user.mention} wants to trade with {user.mention}!\n\n"
+            f"**{interaction.user.display_name} offers:** {pretty_seed(sender_seed_obj)}\n"
+            f"**{user.display_name} would give:** {pretty_seed(recipient_seed_obj)}"
+        ),
+        color=discord.Color.blue()
+    )
+    
+    view = TradeView(interaction.user, user, sender_seed_obj, recipient_seed_obj)
+    
+    await interaction.response.send_message(
+        f"{user.mention}, you received a trade offer from {interaction.user.mention}!",
+        embed=embed,
+        view=view
+    )
 
 @tree.command(name="trade_accept")
 @app_commands.describe(user="User who sent the trade offer")
@@ -769,20 +1048,25 @@ async def trade_accept(interaction: discord.Interaction, user: discord.Member):
         pass
 
 
-@tree.command(name="trade_decline")
-@app_commands.describe(user="User who sent the trade offer")
-async def trade_decline(interaction: discord.Interaction, user: discord.Member):
-    recipient_id = interaction.user.id
-    offer = trade_offers.get(recipient_id)
-    if not offer or offer["sender_id"] != user.id:
-        return await interaction.response.send_message("❌ No trade offer from that user.", ephemeral=True)
-
-    trade_offers.pop(recipient_id)
-    await interaction.response.send_message("❌ Trade offer declined.")
-
+@discord.ui.button(label="Decline Trade", style=ButtonStyle.red)
+async def decline(self, interaction: discord.Interaction, button: Button):
+    if interaction.user.id != self.recipient.id:
+        return await interaction.response.send_message("❌ This trade isn't for you!", ephemeral=True)
+        
+    trade_offers.pop(self.recipient.id, None)
+        
+    embed = discord.Embed(
+        title="❌ Trade Declined",
+        description=f"{self.recipient.mention} declined the trade offer from {self.sender.mention}",
+        color=discord.Color.red()
+    )
+        
+    self.accept.disabled = True
+    self.decline.disabled = True
+    await interaction.response.edit_message(embed=embed, view=self)
+        
     try:
-        sender_user = await bot.fetch_user(user.id)
-        await sender_user.send(f"❌ Your trade was declined by {interaction.user.mention}.")
+        await self.sender.send(f"❌ {self.recipient.mention} declined your trade offer.")
     except:
         pass
 
@@ -833,8 +1117,9 @@ async def trade_logs_command(interaction: discord.Interaction):
         )
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
-@tree.command(name="shoplist")
+@tree.command(name="shop")
 async def shoplist(interaction: discord.Interaction):
+    """View the seed shop with interactive menu"""
     # Purge expired limited seeds
     global limited_seeds
     limited_seeds = {
@@ -843,67 +1128,21 @@ async def shoplist(interaction: discord.Interaction):
     }
 
     embed = discord.Embed(title="🛒 Seed Shop", color=discord.Color.purple())
-
     embed.add_field(
-    name="🌦 Current Season",
-    value=f"{current_season['name']} (Boosted: {', '.join(current_season['boosted_seeds'])})",
-    inline=False
+        name="🌦 Current Season",
+        value=f"{current_season['name']} (Boosted: {', '.join(current_season['boosted_seeds'])})",
+        inline=False
     )
     
-    # Regular Stock
-    if current_stock:
-        regular_seeds = []
-        for seed in current_stock:
-            if seed in seeds:
-                cost, quest = seeds[seed]
-                rarity = SEED_RARITIES.get(seed, "Unknown")
-                regular_seeds.append(f"**{seed}** - {cost} sheckles ({rarity})")
-        
-        embed.add_field(
-            name="🔹 Regular Stock",
-            value="\n".join(regular_seeds) or "No regular seeds available",
-            inline=False
-        )
-
-    # Limited Seeds
+    # Prepare data for the dropdown
     active_limited = [
         (name, data) for name, data in limited_seeds.items()
         if (time.time() < data["expires"] and data["sheckles"] > 0)
     ]
 
-    if active_limited:
-        limited_display = []
-        for name, data in active_limited:
-            time_left = max(0, int((data["expires"] - time.time()) // 60))
-            muts = "All mutations" if data.get("mutations") is None else ", ".join(data["mutations"])
-            limited_display.append(
-                f"**{name}**\n"
-                f"- Cost: {data['sheckles']} sheckles\n"
-                f"- Quest: {data['quest']} messages\n"
-                f"- Mutations: {muts}\n"
-                f"- Time left: {time_left} minutes"
-            )
-        
-        embed.add_field(
-            name="🌟 Limited-Time Seeds",
-            value="\n".join(limited_display) or "No active limited seeds",
-            inline=False
-        )
-
-    # Fertilizers
-    # In shoplist command, add this section:
-    if fertilizers:
-        fert_list = []
-        for name, data in fertilizers.items():
-            fert_list.append(f"**{name}** - {data['cost']} sheckles\n{data['description']}")
-    
-        embed.add_field(
-            name="🧪 Fertilizers",
-            value="\n".join(fert_list) or "No fertilizers available",
-            inline=False
-        )
-
-    await interaction.response.send_message(embed=embed)
+    # Send the view with dropdown
+    view = SeedShopView(current_stock, active_limited, fertilizers)
+    await interaction.response.send_message(embed=embed, view=view)
 
 @tree.command(name="sell_seed")
 @app_commands.describe(seed="Seed name", seed_type="Seed state")
