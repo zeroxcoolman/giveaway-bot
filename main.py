@@ -1391,7 +1391,7 @@ async def use_fertilizer(interaction: discord.Interaction, fertilizer: str):
 
 @tree.command(name="shovel")
 @app_commands.describe(
-    plant="Plant to remove (name or 'all')",
+    plant="Plant to remove (name or 'all') - add 'x1', 'x2' etc. to remove specific amounts",
     plant_type="Type of plant to remove",
     force="Skip confirmation (admin only)"
 )
@@ -1412,7 +1412,16 @@ async def shovel(
     if plant is None:
         return await inventory(interaction)
     
-    base_name, mut, _ = normalize_seed_name(plant)
+    # Parse quantity if specified (e.g. "Carrot x2")
+    quantity = 0  # 0 means all
+    base_plant = plant
+    if "x" in plant.lower():
+        parts = plant.lower().split("x")
+        if len(parts) == 2 and parts[1].isdigit():
+            quantity = int(parts[1])
+            base_plant = parts[0].strip()
+    
+    base_name, mut, _ = normalize_seed_name(base_plant)
     inv = user_inventory[interaction.user.id]
     
     # Find matching plants
@@ -1440,6 +1449,15 @@ async def shovel(
             ephemeral=True
         )
     
+    # Handle quantity
+    if quantity > 0:
+        if quantity > len(matches):
+            return await interaction.response.send_message(
+                f"❌ You only have {len(matches)} of those plants!",
+                ephemeral=True
+            )
+        matches = matches[:quantity]  # Only remove the specified amount
+    
     # Check for special plants needing confirmation
     needs_confirmation = any(
         getattr(p, "limited", False) or p.mutation 
@@ -1451,7 +1469,7 @@ async def shovel(
         mutated_count = sum(1 for p in matches if p.mutation)
         
         embed = discord.Embed(
-            title="⚠️ Confirm Special Plant Removal",
+            title="⚠️ Confirm Plant Removal",
             color=discord.Color.orange()
         )
         embed.description = (
@@ -1467,21 +1485,26 @@ async def shovel(
         
         if not view.confirmed:
             return  # Already handled in the view
+    else:
+        await interaction.response.defer(ephemeral=True)
         
     # Perform removal
+    removed = []
     if check_growing:
+        to_remove = matches[:]  # Copy the matches we want to remove
         inv["growing"] = [
             p for p in inv["growing"]
-            if not (base_name.lower() == "all" or p.name.lower() == base_name.lower()) or
-               (mut is not None and (not p.mutation or p.mutation.lower() != mut.lower()))
+            if p not in to_remove
         ]
+        removed.extend(to_remove)
     
     if check_grown:
+        to_remove = matches[:]  # Copy the matches we want to remove
         inv["grown"] = [
             p for p in inv["grown"]
-            if not (base_name.lower() == "all" or p.name.lower() == base_name.lower()) or
-               (mut is not None and (not p.mutation or p.mutation.lower() != mut.lower()))
+            if p not in to_remove
         ]
+        removed.extend(to_remove)
     
     # Build result embed
     embed = discord.Embed(
@@ -1495,7 +1518,7 @@ async def shovel(
         "limited": 0
     }
     
-    for p in matches:
+    for p in removed:
         if getattr(p, "limited", False):
             removed_counts["limited"] += 1
         elif p.mutation:
@@ -1516,7 +1539,18 @@ async def shovel(
     if removed_counts["limited"] > 0 or removed_counts["mutated"] > 0:
         embed.set_footer(text="⚠️ Limited and mutated plants cannot be recovered!")
     
-    await interaction.followup.send(embed=embed, ephemeral=True)
+    try:
+        # Use followup only if we deferred earlier
+        if needs_confirmation:
+            await interaction.followup.send(embed=embed, ephemeral=True)
+        else:
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+    except discord.errors.NotFound:
+        # Fallback if the interaction expired
+        try:
+            await interaction.user.send(embed=embed)
+        except:
+            pass  # If we can't DM, just silently fail
 
 @tasks.loop(minutes=5)
 async def cleanup_expired():
