@@ -409,7 +409,9 @@ class InventorySelect(Select):
             ]
             embed = discord.Embed(title="🧪 Fertilizers", description='\n'.join(ferts) or "None", color=discord.Color.blue())
         
-        await interaction.response.edit_message(embed=embed)
+        # Keep the view active with the current selection
+        view = InventoryView(interaction.user.id)
+        await interaction.response.edit_message(embed=embed, view=view)
 
 class SeedShopView(View):
     def __init__(self, regular_seeds, limited_seeds, fertilizers):
@@ -461,6 +463,7 @@ class SeedSelect(Select):
     async def callback(self, interaction: discord.Interaction):
         # Extract the base value without the random number
         base_value = "_".join(self.values[0].split("_")[:-1])
+        base_value = "_".join(base_value)  # Rejoin with underscores
         
         if base_value.startswith("seed_"):
             seed = base_value[5:]
@@ -471,9 +474,10 @@ class SeedSelect(Select):
         elif base_value.startswith("fert_"):
             fert = base_value[5:]
             await self.handle_fertilizer_purchase(interaction, fert)
-        
+    
         # Reset the view to allow selecting the same item again
-        await interaction.response.defer()
+        view = SeedShopView(self.regular_seeds, self.limited_seeds, self.fertilizers)
+        await interaction.response.edit_message(view=view)
 
     async def handle_seed_purchase(self, interaction: discord.Interaction, seed_name: str, is_limited: bool):
         base = seed_name
