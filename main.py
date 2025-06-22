@@ -371,7 +371,7 @@ class InventoryView(View):
         inv = user_inventory[interaction.user.id]
         grown_list = [pretty_seed(seed) for seed in inv["grown"]]
         growing_list = [
-            f"{pretty_seed(seed)} [{int(seed.finish_time - time.time())}s]" 
+            f"{pretty_seed(seed)} [{max(0, int(seed.finish_time - time.time()))}s]"
             for seed in inv["growing"]
         ]
         
@@ -406,7 +406,7 @@ class InventorySelect(Select):
         
         if selection == "growing":
             growing_list = [
-                f"{pretty_seed(seed)} [{int(seed.finish_time - time.time())}s]" 
+                f"{pretty_seed(seed)} [{max(0, int(seed.finish_time - time.time()))}s]" 
                 for seed in inv["growing"]
             ]
             embed = discord.Embed(title="🌾 Growing Plants", description='\n'.join(growing_list) or "None", color=discord.Color.green())
@@ -770,7 +770,7 @@ async def inventory(interaction: discord.Interaction):
     inv = user_inventory[interaction.user.id]
     grown_list = [pretty_seed(seed) for seed in inv["grown"]]
     growing_list = [
-        f"{pretty_seed(seed)} [{int(seed.finish_time - time.time())}s]" 
+        f"{pretty_seed(seed)} [{max(0, int(seed.finish_time - time.time()))}s]" 
         for seed in inv["growing"]
     ]
     
