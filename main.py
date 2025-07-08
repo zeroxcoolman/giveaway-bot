@@ -848,7 +848,6 @@ async def stop_giveaway(interaction: discord.Interaction):
 async def inventory(interaction: discord.Interaction):
     try:
         """View your inventory with interactive controls"""
-        await interaction.response.defer()
         update_growing_seeds(interaction.user.id)
         new_achievements = check_achievements(interaction.user.id)
         
