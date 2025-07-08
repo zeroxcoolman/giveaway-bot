@@ -11,6 +11,18 @@ from typing import Optional
 from discord.ui import Select, Button, View
 from discord import ButtonStyle
 
+def auto_defer(ephemeral=True):
+    def decorator(func):
+        async def wrapper(interaction: discord.Interaction, *args, **kwargs):
+            try:
+                await interaction.response.defer(ephemeral=ephemeral)
+            except discord.errors.InteractionAlreadyResponded:
+                pass
+            return await func(interaction, *args, **kwargs)
+        return wrapper
+    return decorator
+
+
 intents = discord.Intents.default()
 intents.messages = True
 intents.guilds = True
@@ -719,6 +731,7 @@ async def end_giveaway(giveaway):
     active_giveaways.pop(giveaway.channel.id, None)
 
 @tree.command(name="add_limited_seed")
+@auto_defer(ephemeral=True)
 @app_commands.describe(
     name="Seed name",
     sheckles="Sheckle cost",
@@ -815,6 +828,7 @@ async def schedule_giveaway_end(giveaway):
         await end_giveaway(giveaway)
 
 @tree.command(name="stop_giveaway")
+@auto_defer(ephemeral=True)
 async def stop_giveaway(interaction: discord.Interaction):
     await interaction.response.defer()
     giveaway = active_giveaways.get(interaction.channel.id)
@@ -826,6 +840,7 @@ async def stop_giveaway(interaction: discord.Interaction):
     await end_giveaway(giveaway)
 
 @tree.command(name="inventory")
+@auto_defer(ephemeral=True)
 async def inventory(interaction: discord.Interaction):
     try:
         """View your inventory with interactive controls"""
@@ -863,6 +878,7 @@ async def check_sheckles(interaction: discord.Interaction):
     await interaction.followup.send(f"💰 You have {sheckles} sheckles.")
 
 @tree.command(name="closest_quest")
+@auto_defer(ephemeral=True)
 async def closest_quest(interaction: discord.Interaction):
     count = user_message_counts[interaction.user.id]
     closest = None
@@ -875,6 +891,7 @@ async def closest_quest(interaction: discord.Interaction):
     await interaction.followup.send(msg)
 
 @tree.command(name="give_seed")
+@auto_defer(ephemeral=True)
 @app_commands.describe(user="User to give seed to", seed="Seed name")
 async def give_seed(interaction: discord.Interaction, user: discord.Member, seed: str):
     if not has_admin_role(interaction.user):
@@ -910,6 +927,7 @@ async def give_seed(interaction: discord.Interaction, user: discord.Member, seed
     await interaction.followup.send(f"✅ Gave {pretty_seed(seed_obj)} to {user.mention}")
 
 @tree.command(name="give_sheckles")
+@auto_defer(ephemeral=True)
 @app_commands.describe(user="User to give sheckles to", amount="Amount of sheckles")
 async def give_sheckles(interaction: discord.Interaction, user: discord.Member, amount: int):
     if not has_admin_role(interaction.user):
@@ -918,6 +936,7 @@ async def give_sheckles(interaction: discord.Interaction, user: discord.Member, 
     await interaction.followup.send(f"✅ Gave {amount} sheckles to {user.mention}")
 
 @tree.command(name="buy_seed")
+@auto_defer(ephemeral=True)
 @app_commands.describe(seed="Seed name to purchase")
 async def buy_seed(interaction: discord.Interaction, seed: str):
     base, mut, seed = normalize_seed_name(seed)
@@ -1035,6 +1054,7 @@ def find_matching_seed(seed_list, desired_input):
     return None
 
 @tree.command(name="trade_offer")
+@auto_defer(ephemeral=True)
 @app_commands.describe(user="User to trade with", yourseed="Seed you're offering", theirseed="Seed you want")
 async def trade_offer(interaction: discord.Interaction, user: discord.Member, yourseed: str, theirseed: str):
     update_growing_seeds(interaction.user.id)
@@ -1097,6 +1117,7 @@ async def trade_offer(interaction: discord.Interaction, user: discord.Member, yo
 
 
 @tree.command(name="trade_offers")
+@auto_defer(ephemeral=True)
 async def view_trade_offers(interaction: discord.Interaction):
     offer = trade_offers.get(interaction.user.id)
     if not offer:
@@ -1125,6 +1146,7 @@ async def view_trade_offers(interaction: discord.Interaction):
     await interaction.followup.send(msg, ephemeral=True)
 
 @tree.command(name="trade_logs")
+@auto_defer(ephemeral=True)
 async def trade_logs_command(interaction: discord.Interaction):
     if not has_admin_role(interaction.user):
         return await interaction.followup.send("❌ Admins only.", ephemeral=True)
@@ -1144,9 +1166,9 @@ async def trade_logs_command(interaction: discord.Interaction):
     await interaction.followup.send(embed=embed, ephemeral=True)
 
 @tree.command(name="shop")
+@auto_defer(ephemeral=True)
 async def shoplist(interaction: discord.Interaction):
     """View the seed shop with interactive menu"""
-    await interaction.response.defer()
     # Purge expired limited seeds
     global limited_seeds
     limited_seeds = {
@@ -1166,6 +1188,7 @@ async def shoplist(interaction: discord.Interaction):
     await interaction.edit_original_response(embed=embed, view=view)
 
 @tree.command(name="sell_seed")
+@auto_defer(ephemeral=True)
 @app_commands.describe(seed="Seed name", seed_type="Seed state")
 @app_commands.choices(seed_type=[
     app_commands.Choice(name="Growing", value="growing"),
@@ -1301,6 +1324,7 @@ async def manual_refresh(interaction: discord.Interaction):
     await interaction.followup.send("🔁 Stock refreshed!", ephemeral=True)
 
 @tree.command(name="growinstant")
+@auto_defer(ephemeral=True)
 @app_commands.describe(user="User whose plant to instantly grow", plant="Plant name")
 async def growinstant(interaction: discord.Interaction, user: discord.Member, plant: str):
     if not has_admin_role(interaction.user):
@@ -1369,6 +1393,7 @@ async def check_plant_events():
             )
 
 @tree.command(name="buy_fertilizer")
+@auto_defer(ephemeral=True)
 @app_commands.describe(fertilizer="Fertilizer name")
 async def buy_fertilizer(interaction: discord.Interaction, fertilizer: str):
     fert = fertilizers.get(fertilizer.title())
@@ -1388,6 +1413,7 @@ async def buy_fertilizer(interaction: discord.Interaction, fertilizer: str):
 
 
 @tree.command(name="use_fertilizer")
+@auto_defer(ephemeral=True)
 @app_commands.describe(fertilizer="Fertilizer name")
 async def use_fertilizer(interaction: discord.Interaction, fertilizer: str):
     fert_name = fertilizer.title()
@@ -1406,6 +1432,7 @@ async def use_fertilizer(interaction: discord.Interaction, fertilizer: str):
     )
 
 @tree.command(name="shovel")
+@auto_defer(ephemeral=True)
 @app_commands.describe(
     plant="Plant to remove (name or 'all') - add 'x1', 'x2' etc. to remove specific amounts",
     plant_type="Type of plant to remove",
