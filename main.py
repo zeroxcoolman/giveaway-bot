@@ -1146,6 +1146,7 @@ async def trade_logs_command(interaction: discord.Interaction):
 @tree.command(name="shop")
 async def shoplist(interaction: discord.Interaction):
     """View the seed shop with interactive menu"""
+    await interaction.response.defer()
     # Purge expired limited seeds
     global limited_seeds
     limited_seeds = {
