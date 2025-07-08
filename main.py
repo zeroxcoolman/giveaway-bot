@@ -10,17 +10,21 @@ from collections import defaultdict
 from typing import Optional
 from discord.ui import Select, Button, View
 from discord import ButtonStyle
+import functools
 
 def auto_defer(ephemeral=True):
     def decorator(func):
-        async def wrapper(interaction: discord.Interaction, *args, **kwargs):
+        @functools.wraps(func)
+        async def wrapper(*args, **kwargs):
+            interaction = args[0]  # Assumes interaction is first
             try:
                 await interaction.response.defer(ephemeral=ephemeral)
             except discord.errors.InteractionAlreadyResponded:
                 pass
-            return await func(interaction, *args, **kwargs)
+            return await func(*args, **kwargs)
         return wrapper
     return decorator
+
 
 
 intents = discord.Intents.default()
