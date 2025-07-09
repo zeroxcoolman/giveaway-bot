@@ -790,7 +790,8 @@ async def add_limited_seed(
     )
 
 async def start_giveaway(interaction: discord.Interaction, winners: int, prize: str, number_range: str, hoster: discord.Member, duration: int = 0, target: Optional[int] = None):
-    await interaction.response.defer()
+    if not interaction.response.is_done():
+        await interaction.response.defer()
 
     if interaction.channel.name != GIVEAWAY_CHANNEL_NAME and not has_admin_role(interaction.user):
         return await interaction.followup.send("❌ Use the giveaway channel!", ephemeral=True)
@@ -834,7 +835,8 @@ async def schedule_giveaway_end(giveaway):
 @tree.command(name="stop_giveaway")
 @auto_defer(ephemeral=True)
 async def stop_giveaway(interaction: discord.Interaction):
-    await interaction.response.defer()
+    if not interaction.response.is_done():
+        await interaction.response.defer()
     giveaway = active_giveaways.get(interaction.channel.id)
     if not giveaway:
         return await interaction.followup.send("❌ No active giveaway", ephemeral=True)
@@ -1532,7 +1534,9 @@ async def shovel(
         if not view.confirmed:
             return  # Already handled in the view
     else:
-        await interaction.response.defer(ephemeral=True)
+        if not interaction.response.is_done():
+            await interaction.response.defer(ephemeral=True)
+
         
     # Perform removal
     removed = []
