@@ -1507,10 +1507,8 @@ async def shovel(
         matches = matches[:quantity]  # Only remove the specified amount
     
     # Check for special plants needing confirmation
-    needs_confirmation = any(
-        getattr(p, "limited", False) or p.mutation 
-        for p in matches
-    ) and not (force and has_admin_role(interaction.user))
+    needs_confirmation = not (force and has_admin_role(interaction.user))
+
     
     if needs_confirmation:
         limited_count = sum(1 for p in matches if getattr(p, "limited", False))
