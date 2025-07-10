@@ -1322,6 +1322,7 @@ async def refresh_stock():
     random.shuffle(current_stock)
 
 @tree.command(name="refresh_stock")
+@auto_defer(ephemeral=True)
 async def manual_refresh(interaction: discord.Interaction):
     if not has_admin_role(interaction.user):
         return await interaction.followup.send("❌ Not allowed", ephemeral=True)
