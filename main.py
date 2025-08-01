@@ -1695,6 +1695,13 @@ async def shovel(
 
 @tree.command(name="apply_middleman", description="Apply for a middleman trade")
 async def apply_middleman(interaction: discord.Interaction):
+    blacklist_role = interaction.guild.get_role(1344056030153146448)
+    if blacklist_role and blacklist_role in interaction.user.roles:
+        return await interaction.response.send_message(
+            "🚫 You are blacklisted from using the middleman system.",
+            ephemeral=True
+        )
+
     await interaction.response.send_modal(MiddlemanModal(bot, interaction))
 
 @tasks.loop(minutes=5)
