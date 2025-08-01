@@ -1694,7 +1694,6 @@ async def shovel(
             pass  # If we can't DM, just silently fail
 
 @tree.command(name="apply_middleman", description="Apply for a middleman trade")
-@auto_defer(ephemeral=True)
 async def apply_middleman(interaction: discord.Interaction):
     await interaction.response.send_modal(MiddlemanModal(bot, interaction))
 
