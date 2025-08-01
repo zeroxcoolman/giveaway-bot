@@ -199,7 +199,7 @@ class CloseTicketView(discord.ui.View):
         super().__init__(timeout=None)
         self.bot = bot
 
-    @discord.ui.button(label="❌ Close Ticket", style=discord.ButtonStyle.red)
+    @discord.ui.button(label="❌ Close Ticket", style=discord.ButtonStyle.red, custom_id="close_ticket_button")
     async def close_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
         middleman_role_id = 1348072637972090880
         if not any(role.id == middleman_role_id for role in interaction.user.roles):
