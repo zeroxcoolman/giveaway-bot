@@ -267,7 +267,8 @@ class MiddlemanModal(discord.ui.Modal, title="Apply for Middleman"):
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(read_messages=False),
             interaction.user: discord.PermissionOverwrite(read_messages=True, send_messages=True),
-            middleman_role: discord.PermissionOverwrite(read_messages=True, send_messages=True, manage_channels=True)
+            middleman_role: discord.PermissionOverwrite(read_messages=True, send_messages=True, manage_channels=True),
+            guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True, manage_messages=True)
         }
     
         try:
