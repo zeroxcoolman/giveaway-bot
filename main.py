@@ -247,51 +247,71 @@ class MiddlemanModal(discord.ui.Modal, title="Apply for Middleman"):
                 "🚫 You failed to confirm properly and were blacklisted.",
                 ephemeral=True
             )
-
+    
         guild = interaction.guild
-
-        category = guild.get_channel(TICKET_CATEGORY_ID := 1348042174159392768)
-        if not category or not isinstance(category, discord.CategoryChannel):
+    
+        # Get the ticket category
+        ticket_category = guild.get_channel(TICKET_CATEGORY_ID)
+        if not ticket_category or not isinstance(ticket_category, discord.CategoryChannel):
             return await interaction.response.send_message("❌ Ticket category not found.", ephemeral=True)
-
+    
         middleman_role = guild.get_role(1348072637972090880)
         if not middleman_role:
             return await interaction.response.send_message("❌ Middleman role not found.", ephemeral=True)
-
+    
         # ✅ Create the ticket
-        ticket_number = len([c for c in category.text_channels if c.name.startswith("ticket-")]) + 1
+        ticket_number = len([c for c in ticket_category.channels if isinstance(c, discord.TextChannel) and c.name.startswith("ticket-")]) + 1
+        
+        # Create overwrites
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(read_messages=False),
             interaction.user: discord.PermissionOverwrite(read_messages=True, send_messages=True),
             middleman_role: discord.PermissionOverwrite(read_messages=True, send_messages=True, manage_channels=True)
         }
-
-        ticket_channel = await guild.create_text_channel(
-            name=f"ticket-{ticket_number}",
-            category=category,
-            overwrites=overwrites,
-            reason="Middleman ticket"
-        )
-
+    
+        try:
+            ticket_channel = await ticket_category.create_text_channel(
+                name=f"ticket-{ticket_number}",
+                overwrites=overwrites,
+                reason="Middleman ticket"
+            )
+        except Exception as e:
+            print(f"Error creating ticket channel: {e}")
+            return await interaction.response.send_message(
+                "❌ Failed to create ticket channel.",
+                ephemeral=True
+            )
+    
         # ✅ Create the embed with all Q&A
         embed = discord.Embed(
             title="📨 Middleman Ticket Application",
             color=discord.Color.green()
         )
-        embed.add_field(name="Q: User ID and Username of the other trader", value=f"A: {self.trader_info.value}", inline=False)
-        embed.add_field(name="Q: Can both traders join Private servers?", value=f"A: {self.private_server.value}", inline=False)
-        embed.add_field(name="Q: Are BOTH traders ready?", value=f"A: {self.ready_status.value}", inline=False)
-        embed.add_field(name="Q: What are you GIVING and RECEIVING?", value=f"A: {self.trade_details.value}", inline=False)
+        embed.add_field(name="Trader Info", value=self.trader_info.value, inline=False)
+        embed.add_field(name="Private Server Access", value=self.private_server.value, inline=False)
+        embed.add_field(name="Ready Status", value=self.ready_status.value, inline=False)
+        embed.add_field(name="Trade Details", value=self.trade_details.value, inline=False)
         embed.set_footer(text=f"Ticket opened by {interaction.user.display_name}", icon_url=interaction.user.display_avatar.url)
-
-        # ✅ Send the embed + close button into the ticket
-        await ticket_channel.send(content=middleman_role.mention, embed=embed, view=CloseTicketView(self.bot))
-
-        # ✅ Confirm to the user
-        await interaction.response.send_message(
-            f"✅ Ticket created: {ticket_channel.mention}",
-            ephemeral=True
-        )
+    
+        try:
+            # Send the embed + close button into the ticket
+            await ticket_channel.send(
+                content=middleman_role.mention,
+                embed=embed,
+                view=CloseTicketView(self.bot)
+            )
+            
+            # Confirm to the user
+            await interaction.response.send_message(
+                f"✅ Ticket created: {ticket_channel.mention}",
+                ephemeral=True
+            )
+        except Exception as e:
+            print(f"Error sending ticket message: {e}")
+            await interaction.response.send_message(
+                "❌ Ticket created but failed to send details.",
+                ephemeral=True
+            )
 
 class TradeView(View):
     def __init__(self, sender, recipient, sender_seed, recipient_seed):
