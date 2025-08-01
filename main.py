@@ -238,26 +238,28 @@ class MiddlemanModal(discord.ui.Modal, title="Apply for Middleman"):
         self.interaction = interaction
 
     async def on_submit(self, interaction: discord.Interaction):
+        # ✅ Check confirmation
         if self.confirm.value.strip().lower() != "yes i understand.":
             blacklist_role = interaction.guild.get_role(1344056030153146448)
             if blacklist_role:
-                await interaction.user.add_roles(blacklist_role, reason="Failed to confirm middleman rules")
+                await interaction.user.add_roles(blacklist_role, reason="Failed to confirm MM rules")
             return await interaction.response.send_message(
-                "❌ You failed to confirm properly and were added to the blacklist.", ephemeral=True
+                "🚫 You failed to confirm properly and were blacklisted.",
+                ephemeral=True
             )
 
         guild = interaction.guild
-        category = discord.utils.get(guild.categories, name="tickets 🎫")
-        if not category:
-            return await interaction.response.send_message("❌ Category '🎫 tickets' not found.", ephemeral=True)
+
+        category = guild.get_channel(TICKET_CATEGORY_ID := 1348042174159392768)
+        if not category or not isinstance(category, discord.CategoryChannel):
+            return await interaction.response.send_message("❌ Ticket category not found.", ephemeral=True)
 
         middleman_role = guild.get_role(1348072637972090880)
         if not middleman_role:
             return await interaction.response.send_message("❌ Middleman role not found.", ephemeral=True)
 
-        existing = [ch for ch in guild.text_channels if ch.name.startswith("ticket-")]
-        ticket_number = len(existing) + 1
-
+        # ✅ Create the ticket
+        ticket_number = len([c for c in category.text_channels if c.name.startswith("ticket-")]) + 1
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(read_messages=False),
             interaction.user: discord.PermissionOverwrite(read_messages=True, send_messages=True),
@@ -271,19 +273,25 @@ class MiddlemanModal(discord.ui.Modal, title="Apply for Middleman"):
             reason="Middleman ticket"
         )
 
+        # ✅ Create the embed with all Q&A
         embed = discord.Embed(
-            title="📨 Middleman Ticket Created",
+            title="📨 Middleman Ticket Application",
             color=discord.Color.green()
         )
-        embed.add_field(name="Applicant", value=interaction.user.mention, inline=False)
-        embed.add_field(name="Other Trader", value=self.trader_info.value, inline=False)
-        embed.add_field(name="Private Server?", value=self.private_server.value, inline=True)
-        embed.add_field(name="Traders Ready?", value=self.ready_status.value, inline=True)
-        embed.add_field(name="GIVING / RECEIVING", value=self.trade_details.value, inline=False)
+        embed.add_field(name="Q: User ID and Username of the other trader", value=f"A: {self.trader_info.value}", inline=False)
+        embed.add_field(name="Q: Can both traders join Private servers?", value=f"A: {self.private_server.value}", inline=False)
+        embed.add_field(name="Q: Are BOTH traders ready?", value=f"A: {self.ready_status.value}", inline=False)
+        embed.add_field(name="Q: What are you GIVING and RECEIVING?", value=f"A: {self.trade_details.value}", inline=False)
+        embed.set_footer(text=f"Ticket opened by {interaction.user.display_name}", icon_url=interaction.user.display_avatar.url)
 
-        view = CloseTicketView(self.bot)
-        await ticket_channel.send(content=middleman_role.mention, embed=embed, view=view)
-        await interaction.response.send_message(f"✅ Your ticket was created: {ticket_channel.mention}", ephemeral=True)
+        # ✅ Send the embed + close button into the ticket
+        await ticket_channel.send(content=middleman_role.mention, embed=embed, view=CloseTicketView(self.bot))
+
+        # ✅ Confirm to the user
+        await interaction.response.send_message(
+            f"✅ Ticket created: {ticket_channel.mention}",
+            ephemeral=True
+        )
 
 class TradeView(View):
     def __init__(self, sender, recipient, sender_seed, recipient_seed):
