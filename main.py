@@ -194,6 +194,97 @@ limited_seeds = {}
 trade_offers = {}  # user_id -> dict with keys: sender_id, seed_name, timestamp
 trade_logs = []
 
+class CloseTicketView(discord.ui.View):
+    def __init__(self, bot):
+        super().__init__(timeout=None)
+        self.bot = bot
+
+    @discord.ui.button(label="❌ Close Ticket", style=discord.ButtonStyle.red)
+    async def close_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
+        middleman_role_id = 1348072637972090880
+        if not any(role.id == middleman_role_id for role in interaction.user.roles):
+            return await interaction.response.send_message("❌ Only middlemen can close tickets.", ephemeral=True)
+
+        await interaction.response.send_message("✅ Closing ticket...", ephemeral=True)
+        await interaction.channel.delete(reason="Ticket closed by middleman")
+
+class MiddlemanModal(discord.ui.Modal, title="Apply for Middleman"):
+    confirm = discord.ui.TextInput(
+        label="PINGING A MIDDLEMAN WILL RESULT IN BLACKLIST!",
+        placeholder="In order to make a ticket say 'Yes I understand.'",
+        min_length=2, max_length=32
+    )
+    trader_info = discord.ui.TextInput(
+        label="UserID and Username of the other trader",
+        placeholder="someone & 1234567890"
+    )
+    private_server = discord.ui.TextInput(
+        label="Can both traders join Private servers?",
+        placeholder="YES/NO"
+    )
+    ready_status = discord.ui.TextInput(
+        label="Are BOTH traders ready?",
+        placeholder="YES/NO"
+    )
+    trade_details = discord.ui.TextInput(
+        label="What are you GIVING and RECEIVING?",
+        placeholder="GIVING some random plant. RECEIVING some random plant.",
+        style=discord.TextStyle.paragraph
+    )
+
+    def __init__(self, bot, interaction):
+        super().__init__()
+        self.bot = bot
+        self.interaction = interaction
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if self.confirm.value.strip().lower() != "yes i understand.":
+            blacklist_role = interaction.guild.get_role(1344056030153146448)
+            if blacklist_role:
+                await interaction.user.add_roles(blacklist_role, reason="Failed to confirm middleman rules")
+            return await interaction.response.send_message(
+                "❌ You failed to confirm properly and were added to the blacklist.", ephemeral=True
+            )
+
+        guild = interaction.guild
+        category = discord.utils.get(guild.categories, name="🎫 tickets")
+        if not category:
+            return await interaction.response.send_message("❌ Category '🎫 tickets' not found.", ephemeral=True)
+
+        middleman_role = guild.get_role(1348072637972090880)
+        if not middleman_role:
+            return await interaction.response.send_message("❌ Middleman role not found.", ephemeral=True)
+
+        existing = [ch for ch in guild.text_channels if ch.name.startswith("ticket-")]
+        ticket_number = len(existing) + 1
+
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(read_messages=False),
+            interaction.user: discord.PermissionOverwrite(read_messages=True, send_messages=True),
+            middleman_role: discord.PermissionOverwrite(read_messages=True, send_messages=True, manage_channels=True)
+        }
+
+        ticket_channel = await guild.create_text_channel(
+            name=f"ticket-{ticket_number}",
+            category=category,
+            overwrites=overwrites,
+            reason="Middleman ticket"
+        )
+
+        embed = discord.Embed(
+            title="📨 Middleman Ticket Created",
+            color=discord.Color.green()
+        )
+        embed.add_field(name="Applicant", value=interaction.user.mention, inline=False)
+        embed.add_field(name="Other Trader", value=self.trader_info.value, inline=False)
+        embed.add_field(name="Private Server?", value=self.private_server.value, inline=True)
+        embed.add_field(name="Traders Ready?", value=self.ready_status.value, inline=True)
+        embed.add_field(name="GIVING / RECEIVING", value=self.trade_details.value, inline=False)
+
+        view = CloseTicketView(self.bot)
+        await ticket_channel.send(content=middleman_role.mention, embed=embed, view=view)
+        await interaction.response.send_message(f"✅ Your ticket was created: {ticket_channel.mention}", ephemeral=True)
+
 class TradeView(View):
     def __init__(self, sender, recipient, sender_seed, recipient_seed):
         super().__init__(timeout=300)  # 5 minute timeout
@@ -699,6 +790,7 @@ def has_admin_role(member):
 @bot.event
 async def on_ready():
     print(f"Logged in as {bot.user} (ID: {bot.user.id})")
+    bot.add_view(CloseTicketView(bot))
     refresh_stock.start()
 
     rotate_seasons.start()
@@ -1600,6 +1692,11 @@ async def shovel(
             await interaction.user.send(embed=embed)
         except:
             pass  # If we can't DM, just silently fail
+
+@tree.command(name="apply_middleman", description="Apply for a middleman trade")
+@auto_defer(ephemeral=True)
+async def apply_middleman(interaction: discord.Interaction):
+    await interaction.response.send_modal(MiddlemanModal(bot, interaction))
 
 @tasks.loop(minutes=5)
 async def cleanup_expired():
