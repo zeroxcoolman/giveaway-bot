@@ -247,7 +247,7 @@ class MiddlemanModal(discord.ui.Modal, title="Apply for Middleman"):
             )
 
         guild = interaction.guild
-        category = discord.utils.get(guild.categories, name="🎫 tickets")
+        category = discord.utils.get(guild.categories, name="tickets 🎫")
         if not category:
             return await interaction.response.send_message("❌ Category '🎫 tickets' not found.", ephemeral=True)
 
