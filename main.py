@@ -1871,8 +1871,11 @@ async def on_message(message):
         except ValueError:
             return  # Ignore non-numeric guesses
 
+        if not message.content.strip().isdigit():
+            return  # Ignore non-numeric guesses
+
         # Check if guess is correct
-        correct = giveaway.check_guess(message.author, guess)
+        correct = giveaway['object'].check_guess(message.author, guess)
         if correct is None:
             return  # Not ready to check or guess invalid
 
