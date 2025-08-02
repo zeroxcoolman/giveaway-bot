@@ -1765,69 +1765,81 @@ async def cleanup_expired():
     target="Optional target user"
 )
 @app_commands.checks.has_any_role(*ADMIN_ROLE_IDS)
-async def giveaway(interaction: discord.Interaction, author: discord.User, number_range: str, duration: str, target: Optional[discord.User] = None):
+async def giveaway(
+    interaction: discord.Interaction,
+    author: discord.User,
+    number_range: str,
+    duration: str,
+    target: Optional[discord.User] = None
+):
     if interaction.channel.id != 1363495611995001013:
         await interaction.response.send_message("This command can only be used in the giveaway channel.", ephemeral=True)
         return
 
-    # Parse number range
+    # Parse range like "1-100"
     try:
         start, end = map(int, number_range.split("-"))
         if start >= end:
             raise ValueError
-    except ValueError:
-        await interaction.response.send_message("Invalid range format. Use format like `1-100`.", ephemeral=True)
+    except:
+        await interaction.response.send_message("❌ Invalid number range. Use a format like `1-100`.", ephemeral=True)
         return
 
-    # Parse duration
+    # Parse duration like "30s", "2m", "1h"
     time_units = {"s": 1, "m": 60, "h": 3600}
     try:
         time_unit = duration[-1]
         time_value = int(duration[:-1])
         duration_seconds = time_value * time_units[time_unit]
     except:
-        await interaction.response.send_message("Invalid duration format. Use like `30s`, `1m`, or `2h`.", ephemeral=True)
+        await interaction.response.send_message("❌ Invalid duration. Use `30s`, `1m`, `2h` etc.", ephemeral=True)
         return
 
+    # Generate random number
     secret_number = random.randint(start, end)
+
+    # Store giveaway
     active_giveaways[interaction.channel.id] = {
         "number": secret_number,
         "host_id": author.id,
         "executor_id": interaction.user.id,
         "participants": set(),
         "range": number_range,
-        "expires": time.time() + duration_seconds
+        "expires": time.time() + duration_seconds,
+        "winners": set()
     }
 
-    # Open the channel to @everyone and enable slowmode (5 seconds)
+    # Open the channel + set slowmode
     await interaction.channel.set_permissions(interaction.guild.default_role, send_messages=True)
     await interaction.channel.edit(slowmode_delay=5)
 
+    # Build embed
     embed = discord.Embed(
-        title="🎉 Number Giveaway Started!",
+        title="🎁 Number Giveaway Started!",
         description=(
             f"**Host:** {author.mention}\n"
             f"**Range:** {number_range}\n"
             f"**Duration:** {duration}\n\n"
-            "Guess the correct number in this channel!\n"
-            "Cooldown: 5 seconds between guesses."
+            "Type a number in this channel to guess!\n"
+            "Cooldown: 5 seconds per guess."
         ),
         color=discord.Color.green()
     )
+
     if target:
-        embed.add_field(name="Targeted At", value=target.mention)
+        embed.add_field(name="🎯 Target", value=target.mention)
 
     await interaction.response.send_message(embed=embed)
 
-    # Wait for the giveaway to end
+    # Wait for giveaway to end
     await asyncio.sleep(duration_seconds)
 
-    # If giveaway still active (not stopped manually)
+    # If not ended early
     if interaction.channel.id in active_giveaways:
         del active_giveaways[interaction.channel.id]
         await interaction.channel.set_permissions(interaction.guild.default_role, send_messages=False)
         await interaction.channel.edit(slowmode_delay=0)
-        await interaction.channel.send("⏰ Giveaway ended. No one guessed the number.")
+        await interaction.channel.send("⏰ The giveaway has ended. No one guessed the correct number.")
 
 @bot.event
 async def on_message(message):
