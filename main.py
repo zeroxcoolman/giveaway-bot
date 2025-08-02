@@ -1846,7 +1846,7 @@ async def on_message(message):
     if message.author.bot:
         return
 
-    # Increment message count for sheckles
+    # Always increment message count for sheckles
     user_message_counts[message.author.id] += 1
     if user_message_counts[message.author.id] % MESSAGES_PER_SHECKLE == 0:
         user_sheckles[message.author.id] += 1
@@ -1864,33 +1864,58 @@ async def on_message(message):
                     pass
             return  # Always allow non-number host messages
 
-        # For everyone else - only allow number guesses
-        if not message.content.strip().isdigit():
+        # For participants - only process number guesses
+        if message.content.strip().isdigit():
+            try:
+                guess = int(message.content.strip())
+                start, end = map(int, current_giveaway['range'].split('-'))
+                
+                if guess < start or guess > end:
+                    try:
+                        await message.reply(f"❌ Guess must be between {start}-{end}!", delete_after=5)
+                    except:
+                        pass
+                    return
+                
+                # Check if guess is correct
+                if guess == current_giveaway['number']:
+                    current_giveaway.setdefault('winners', set()).add(message.author)
+                    
+                    # DM the winner
+                    try:
+                        await message.author.send(
+                            f"🎉 You guessed the correct number `{guess}`!\n"
+                            f"Please contact <@{current_giveaway['host_id']}> to claim your prize."
+                        )
+                    except:
+                        await message.channel.send(
+                            f"🎉 <@{message.author.id}> guessed correctly but can't receive DMs. Please contact the host!"
+                        )
+                    
+                    # End the giveaway
+                    await message.channel.set_permissions(message.guild.default_role, send_messages=False)
+                    await message.channel.edit(slowmode_delay=0)
+                    await message.channel.send(
+                        f"🏆 Giveaway ended! {message.author.mention} guessed the correct number `{guess}`!"
+                    )
+                    del active_giveaways[message.channel.id]
+                
+                else:
+                    # Optional: Add reaction to show guess was received
+                    try:
+                        await message.add_reaction("🔢")
+                    except:
+                        pass
+                    
+            except ValueError:
+                pass
+        else:
+            # Delete non-number messages from participants
             try:
                 await message.delete()
             except:
                 pass
             return
-
-        # Process number guesses
-        try:
-            guess = int(message.content.strip())
-            start, end = map(int, current_giveaway['range'].split('-'))
-            
-            if guess < start or guess > end:
-                try:
-                    await message.reply(f"Guess must be between {start}-{end}!", delete_after=5)
-                    await message.delete()
-                except:
-                    pass
-                return
-
-            if guess == current_giveaway['number']:
-                # Winner handling logic...
-                pass
-
-        except ValueError:
-            pass
 
     await bot.process_commands(message)
 
