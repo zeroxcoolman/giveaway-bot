@@ -1770,10 +1770,6 @@ async def giveaway(interaction: discord.Interaction, author: discord.User, numbe
         await interaction.response.send_message("This command can only be used in the giveaway channel.", ephemeral=True)
         return
 
-    if author.id == interaction.user.id:
-        await interaction.response.send_message("You can't be both the author and executor of the giveaway.", ephemeral=True)
-        return
-
     # Parse number range
     try:
         start, end = map(int, number_range.split("-"))
