@@ -1857,7 +1857,7 @@ async def on_message(message):
     giveaway = active_giveaways.get(message.channel.id)
     if giveaway:
         # Prevent host or executor from participating
-        if message.author.id in (giveaway.host_id, giveaway.executor_id):
+        if message.author.id in (giveaway['host_id'], giveaway['executor_id']):
             try:
                 await message.reply("❌ You cannot participate in your own giveaway.", delete_after=5)
                 await message.delete()
@@ -1877,7 +1877,7 @@ async def on_message(message):
             return  # Not ready to check or guess invalid
 
         if correct:
-            giveaway.winners.add(message.author)
+            giveaway.setdefault('winners', set()).add(message.author)
 
             # DM the winner
             try:
