@@ -1757,36 +1757,146 @@ async def cleanup_expired():
             if boost_data["expires"] < current_time:
                 del user_active_boosts[user_id][boost_type]
 
+@tree.command(name="giveaway", description="Start a number guessing giveaway")
+@app_commands.describe(
+    author="User hosting the giveaway",
+    number_range="Range for guessing (e.g. 1-100)",
+    duration="How long the giveaway lasts (e.g. 1m, 30s, 2h)",
+    target="Optional target user"
+)
+@app_commands.checks.has_any_role(*ADMIN_ROLE_IDS)
+async def giveaway(interaction: discord.Interaction, author: discord.User, number_range: str, duration: str, target: Optional[discord.User] = None):
+    if interaction.channel.id != 1363495611995001013:
+        await interaction.response.send_message("This command can only be used in the giveaway channel.", ephemeral=True)
+        return
+
+    if author.id == interaction.user.id:
+        await interaction.response.send_message("You can't be both the author and executor of the giveaway.", ephemeral=True)
+        return
+
+    # Parse number range
+    try:
+        start, end = map(int, number_range.split("-"))
+        if start >= end:
+            raise ValueError
+    except ValueError:
+        await interaction.response.send_message("Invalid range format. Use format like `1-100`.", ephemeral=True)
+        return
+
+    # Parse duration
+    time_units = {"s": 1, "m": 60, "h": 3600}
+    try:
+        time_unit = duration[-1]
+        time_value = int(duration[:-1])
+        duration_seconds = time_value * time_units[time_unit]
+    except:
+        await interaction.response.send_message("Invalid duration format. Use like `30s`, `1m`, or `2h`.", ephemeral=True)
+        return
+
+    secret_number = random.randint(start, end)
+    active_giveaways[interaction.channel.id] = {
+        "number": secret_number,
+        "host_id": author.id,
+        "executor_id": interaction.user.id,
+        "participants": set(),
+        "range": number_range,
+        "expires": time.time() + duration_seconds
+    }
+
+    # Open the channel to @everyone and enable slowmode (5 seconds)
+    await interaction.channel.set_permissions(interaction.guild.default_role, send_messages=True)
+    await interaction.channel.edit(slowmode_delay=5)
+
+    embed = discord.Embed(
+        title="🎉 Number Giveaway Started!",
+        description=(
+            f"**Host:** {author.mention}\n"
+            f"**Range:** {number_range}\n"
+            f"**Duration:** {duration}\n\n"
+            "Guess the correct number in this channel!\n"
+            "Cooldown: 5 seconds between guesses."
+        ),
+        color=discord.Color.green()
+    )
+    if target:
+        embed.add_field(name="Targeted At", value=target.mention)
+
+    await interaction.response.send_message(embed=embed)
+
+    # Wait for the giveaway to end
+    await asyncio.sleep(duration_seconds)
+
+    # If giveaway still active (not stopped manually)
+    if interaction.channel.id in active_giveaways:
+        del active_giveaways[interaction.channel.id]
+        await interaction.channel.set_permissions(interaction.guild.default_role, send_messages=False)
+        await interaction.channel.edit(slowmode_delay=0)
+        await interaction.channel.send("⏰ Giveaway ended. No one guessed the number.")
+
 @bot.event
 async def on_message(message):
     if message.author.bot:
         return
-    
+
     # Increment message count
     user_message_counts[message.author.id] += 1
-    
-    # Award sheckles for every MESSAGES_PER_SHECKLE messages
+
+    # Award shekels for every MESSAGES_PER_SHECKLE messages
     if user_message_counts[message.author.id] % MESSAGES_PER_SHECKLE == 0:
         user_sheckles[message.author.id] += 1
 
     # Handle giveaway guessing
     giveaway = active_giveaways.get(message.channel.id)
     if giveaway:
-        try:
-            guess = int(message.content)
-        except:
+        # Prevent host or executor from participating
+        if message.author.id in (giveaway.host_id, giveaway.executor_id):
+            try:
+                await message.reply("❌ You cannot participate in your own giveaway.", delete_after=5)
+                await message.delete()
+            except:
+                pass
             return
+
+        # Try to parse number from message
+        try:
+            guess = int(message.content.strip())
+        except ValueError:
+            return  # Ignore non-numeric guesses
+
+        # Check if guess is correct
         correct = giveaway.check_guess(message.author, guess)
         if correct is None:
-            return
+            return  # Not ready to check or guess invalid
+
         if correct:
             giveaway.winners.add(message.author)
-            if len(giveaway.winners) >= giveaway.winners_required:
-                await end_giveaway(giveaway)
+
+            # DM the winner
+            try:
+                await message.author.send(
+                    f"🎉 You guessed the correct number `{guess}`!\n"
+                    f"Please contact <@{giveaway.host_id}> to claim your prize."
+                )
+            except:
+                await message.channel.send(
+                    f"🎉 <@{message.author.id}> guessed the number but I couldn't DM them. Please contact the host!"
+                )
+
+            # Lock the channel and remove slowmode
+            await message.channel.set_permissions(message.guild.default_role, send_messages=False)
+            await message.channel.edit(slowmode_delay=0)
+
+            await message.channel.send(
+                f"🎊 {message.author.mention} guessed the correct number `{guess}`! Giveaway ended."
+            )
+
+            await end_giveaway(giveaway)
+
         else:
-            # optional feedback if you want
+            # Optional: feedback for incorrect guess
             pass
 
+    # Keep command processing intact
     await bot.process_commands(message)
 
 # Run your bot (replace TOKEN with your bot's token)
