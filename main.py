@@ -502,11 +502,9 @@ class GiveawayView(discord.ui.View):
         self.message = None  # Will store our message reference
 
     def disable_expired_buttons(self):
-        """Disable join button if giveaway has ended"""
-        if time.time() > self.giveaway.end_time:
-            join_button = self.get_item("join_giveaway")
-            if join_button:
-                join_button.disabled = True
+        for child in self.children:
+            if isinstance(child, discord.ui.Button) and child.custom_id == "join_giveaway":
+                child.disabled = True
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if not self.message:
