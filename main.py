@@ -423,14 +423,20 @@ class Giveaway:
         self.task = None
 
     def check_guess(self, user, guess):
+    # First check if giveaway has ended
         if time.time() > self.end_time:
             return None  # Giveaway has ended
             
         if user.id == self.hoster.id:  # Host can't participate
             return None
+            
+        # Track participation
+        self.participants.add(user)
+        
         if user.id not in self.guessed_users:
             self.guessed_users[user.id] = []
         self.guessed_users[user.id].append(guess)
+        
         return guess == self.target
 
 class GuessModal(discord.ui.Modal, title='Enter Your Guess'):
@@ -2136,7 +2142,7 @@ async def on_message(message):
     # Handle giveaway messages
     current_giveaway = active_giveaways.get(message.channel.id)
     if current_giveaway:
-        # Check if giveaway has ended
+        # First check if giveaway has ended
         if time.time() > current_giveaway.end_time:
             try:
                 await message.delete()
@@ -2145,6 +2151,7 @@ async def on_message(message):
                 pass
             return
 
+        # Only process number guesses
         if message.content.strip().isdigit():
             try:
                 guess = int(message.content.strip())
@@ -2176,12 +2183,11 @@ async def on_message(message):
                     if len(current_giveaway.winners) >= current_giveaway.winners_required:
                         await end_giveaway(current_giveaway)
                 
-                else:
-                    # Optional: Add reaction to show guess was received
-                    try:
-                        await message.add_reaction("🔢")
-                    except:
-                        pass
+                # Add reaction to show guess was received
+                try:
+                    await message.add_reaction("🔢")
+                except:
+                    pass
                     
             except ValueError:
                 pass
