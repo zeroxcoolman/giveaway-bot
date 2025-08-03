@@ -414,18 +414,17 @@ class Giveaway:
         self.low, self.high = number_range
         self.target = target
         self.duration = duration
-        self.duration_minutes = duration  # Add this line to match the embed reference
+        self.duration_minutes = duration
         self.channel = channel
         self.winners = set()
-        self.participants = set()  # Track who joined
-        self.guessed_users = {}    # Track guesses per user
-        self.guesses = {}          # Alternative name for guessed_users for compatibility
-        self.end_time = time.time() + (duration * 60) if duration > 0 else float('inf')
+        self.participants = set()
+        self.guessed_users = {}
+        self.end_time = time.time() + (duration * 60) if duration > 0 else None  # None for no time limit
         self.task = None
 
     def check_guess(self, user, guess):
-    # First check if giveaway has ended
-        if time.time() > self.end_time:
+        # First check if giveaway has ended (only if it has an end time)
+        if self.end_time is not None and time.time() > self.end_time:
             return None  # Giveaway has ended
             
         if user.id == self.hoster.id:  # Host can't participate
@@ -2143,8 +2142,8 @@ async def on_message(message):
     # Handle giveaway messages
     current_giveaway = active_giveaways.get(message.channel.id)
     if current_giveaway:
-        # First check if giveaway has ended
-        if time.time() > current_giveaway.end_time:
+        # First check if giveaway has ended (only for timed giveaways)
+        if current_giveaway.end_time is not None and time.time() > current_giveaway.end_time:
             try:
                 await message.delete()
                 await message.author.send("❌ This giveaway has already ended!", delete_after=10)
@@ -2201,6 +2200,7 @@ async def on_message(message):
             return
 
     await bot.process_commands(message)
+
 
 # Run your bot (replace TOKEN with your bot's token)
 bot.run(os.getenv("BOT_TOKEN"))
