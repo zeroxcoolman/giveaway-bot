@@ -502,10 +502,17 @@ class GiveawayView(discord.ui.View):
         self.message = None  # Will store our message reference
 
     def disable_expired_buttons(self):
-        if time.time() > self.giveaway.end_time:
-            for item in self.children:
-                if isinstance(item, discord.ui.Button) and item.custom_id == "join_giveaway":
-                    item.disabled = True
+        join_button = self.get_button("join_giveaway")
+        if join_button:
+            join_button.disabled = True
+    
+        participants_button = self.get_button("view_participants")
+        if participants_button:
+            participants_button.disabled = False  # Keep enabled
+    
+        guesses_button = self.get_button("my_guesses")
+        if guesses_button:
+            guesses_button.disabled = False  # You can still view past guesses
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if not hasattr(self, 'message') or self.message is None:
