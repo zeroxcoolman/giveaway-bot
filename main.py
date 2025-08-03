@@ -537,7 +537,7 @@ class GiveawayView(discord.ui.View):
                 ephemeral=True
             )
 
-        embed = create_participants_embed(participants, 0, total_pages)
+        embed = self.create_participants_embed(participants, 0, total_pages)
         view = ParticipantsView(
             giveaway=self.giveaway,
             participants=participants,
@@ -555,6 +555,19 @@ class GiveawayView(discord.ui.View):
 
         formatted = ', '.join(map(str, guesses))
         await interaction.response.send_message(f"📋 Your guesses: `{formatted}`", ephemeral=True)
+        
+    def create_participants_embed(self, participants, page, total_pages):
+        start_index = page * 10
+        end_index = start_index + 10
+        page_participants = participants[start_index:end_index]
+        
+        embed = discord.Embed(
+            title="👥 Giveaway Participants",
+            description="\n".join(f"{i+1}. {p.mention}" for i, p in enumerate(page_participants, start=start_index)),
+            color=discord.Color.blue()
+        )
+        embed.set_footer(text=f"Page {page+1} of {total_pages}")
+        return embed
 
 def create_giveaway_embed(giveaway: Giveaway) -> discord.Embed:
     embed = discord.Embed(
