@@ -485,6 +485,11 @@ class GiveawayView(discord.ui.View):
         super().__init__(timeout=None)
         self.giveaway = giveaway
     
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if not hasattr(self, 'message'):
+            self.message = interaction.message
+        return await super().interaction_check(interaction)
+    
     @discord.ui.button(label="Join Giveaway", style=discord.ButtonStyle.green, custom_id="join_giveaway")
     async def join_giveaway(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(GuessModal(self.giveaway))
@@ -580,6 +585,7 @@ class ParticipantsView(discord.ui.View):
         self.participants = participants
         self.current_page = current_page
         self.total_pages = total_pages
+        self.original_view = original_view
         
         # Disable navigation buttons when appropriate
         self.prev_button.disabled = current_page == 0
@@ -599,10 +605,16 @@ class ParticipantsView(discord.ui.View):
     
     @discord.ui.button(label="Back", style=discord.ButtonStyle.blurple)
     async def back_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # Return to main giveaway view
-        embed = create_giveaway_embed(self.giveaway)
-        view = GiveawayView(self.giveaway)
-        await interaction.response.edit_message(embed=embed, view=view)
+        """Return to the original giveaway view"""
+        if self.original_view and hasattr(self.original_view, 'message'):
+            # Reuse the original view and message
+            await self.original_view.message.edit(view=self.original_view)
+            await interaction.response.defer()
+        else:
+            # Fallback if original view isn't available
+            embed = create_giveaway_embed(self.giveaway)
+            view = GiveawayView(self.giveaway)
+            await interaction.response.edit_message(embed=embed, view=view)
     
     @discord.ui.button(label="Next ▶", style=discord.ButtonStyle.gray)
     async def next_button(self, interaction: discord.Interaction, button: discord.ui.Button):
