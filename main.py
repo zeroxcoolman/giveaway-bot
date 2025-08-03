@@ -405,6 +405,28 @@ class TradeView(View):
         except:
             pass
 
+class Giveaway:
+    def __init__(self, hoster, prize, winners, number_range, target, duration, channel):
+        self.hoster = hoster
+        self.prize = prize
+        self.winners_required = winners
+        self.low, self.high = number_range
+        self.target = target
+        self.duration = duration
+        self.channel = channel
+        self.winners = set()
+        self.guessed_users = {}
+        self.end_time = time.time() + (duration * 60) if duration > 0 else float('inf')
+        self.task = None
+
+    def check_guess(self, user, guess):
+        if user.id == self.hoster.id:
+            return None
+        if user.id not in self.guessed_users:
+            self.guessed_users[user.id] = []
+        self.guessed_users[user.id].append(guess)
+        return guess == self.target
+
 class GiveawayView(discord.ui.View):
     def __init__(self, giveaway: Giveaway):
         super().__init__(timeout=None)
