@@ -433,21 +433,21 @@ class Giveaway:
         self.participants.add(user)  # Track participation
         return guess == self.target
 
-class GuessModal(discord.ui.Modal, title="Enter Your Guess"):
-    guess = discord.ui.TextInput(
-        label="Enter your guess",  # Generic label, will update in __init__
-        placeholder="Your guess...",
-        min_length=1,
-        max_length=10
-    )
-
-    def __init__(self, giveaway):
+class GuessModal(discord.ui.Modal, title='Enter Your Guess'):
+    guess = discord.ui.TextInput(label='Your guess', placeholder='Enter a number between X and Y')
+    
+    def __init__(self, giveaway: Giveaway):
         super().__init__()
         self.giveaway = giveaway
-        # Update the label dynamically
-        self.guess.label = f"Enter a number between {giveaway.low} and {giveaway.high}"
-
+    
     async def on_submit(self, interaction: discord.Interaction):
+        # Prevent host from guessing
+        if interaction.user.id == self.giveaway.hoster.id:
+            return await interaction.response.send_message(
+                "❌ You can't participate in your own giveaway!",
+                ephemeral=True
+            )
+        
         try:
             guess = int(self.guess.value)
             if guess < self.giveaway.low or guess > self.giveaway.high:
@@ -456,13 +456,12 @@ class GuessModal(discord.ui.Modal, title="Enter Your Guess"):
                     ephemeral=True
                 )
             
-            # Check if the guess is correct
-            is_correct = self.giveaway.check_guess(interaction.user, guess)
-            
-            if is_correct:
+            # Check if guess is correct
+            if self.giveaway.check_guess(interaction.user, guess):
                 self.giveaway.winners.add(interaction.user)
+                
                 await interaction.response.send_message(
-                    f"🎉 Correct! You guessed the number {guess}!",
+                    f"🎉 You guessed the correct number `{guess}`!",
                     ephemeral=True
                 )
                 
@@ -471,12 +470,15 @@ class GuessModal(discord.ui.Modal, title="Enter Your Guess"):
                     await end_giveaway(self.giveaway)
             else:
                 await interaction.response.send_message(
-                    f"❌ {guess} is not the correct number. Try again!",
+                    "❌ That's not the correct number. Try again!",
                     ephemeral=True
                 )
                 
         except ValueError:
-            await interaction.response.send_message("❌ Please enter a valid number!", ephemeral=True)
+            await interaction.response.send_message(
+                "❌ Please enter a valid number!",
+                ephemeral=True
+            )
 
 class GiveawayView(discord.ui.View):
     def __init__(self, giveaway: Giveaway):
@@ -571,7 +573,6 @@ def create_giveaway_embed(giveaway: Giveaway) -> discord.Embed:
     
     return embed
 
-
 class ParticipantsView(discord.ui.View):
     def __init__(self, giveaway: Giveaway, participants: list, current_page: int, total_pages: int):
         super().__init__(timeout=60)
@@ -583,6 +584,12 @@ class ParticipantsView(discord.ui.View):
         # Disable navigation buttons when appropriate
         self.prev_button.disabled = current_page == 0
         self.next_button.disabled = current_page >= total_pages - 1
+    
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        # Store the message reference on first interaction
+        if not hasattr(self, 'message'):
+            self.message = interaction.message
+        return await super().interaction_check(interaction)
     
     @discord.ui.button(label="◀ Previous", style=discord.ButtonStyle.gray)
     async def prev_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -622,7 +629,8 @@ class ParticipantsView(discord.ui.View):
         for item in self.children:
             item.disabled = True
         try:
-            await self.message.edit(view=self)
+            if hasattr(self, 'message'):
+                await self.message.edit(view=self)
         except discord.NotFound:
             pass  # Message was already deleted
 
@@ -2082,51 +2090,47 @@ async def on_message(message):
     # Handle giveaway messages
     current_giveaway = active_giveaways.get(message.channel.id)
     if current_giveaway:
-        # Use object attributes instead of dictionary keys
+        # Prevent host from guessing
         if message.author.id == current_giveaway.hoster.id:
             if message.content.strip().isdigit():
                 try:
                     await message.delete()
-                    await message.author.send("❌ Hosts can't submit number guesses!", delete_after=10)
+                    await message.author.send("❌ You can't participate in your own giveaway!", delete_after=10)
                 except:
                     pass
-            return  # Always allow non-number host messages
+            return  # Skip processing host's messages
 
-        # For participants - only process number guesses
+        # Rest of the giveaway handling logic...
         if message.content.strip().isdigit():
             try:
                 guess = int(message.content.strip())
-                start, end = map(int, current_giveaway['range'].split('-'))
                 
-                if guess < start or guess > end:
+                # Check if guess is within range
+                if guess < current_giveaway.low or guess > current_giveaway.high:
                     try:
-                        await message.reply(f"❌ Guess must be between {start}-{end}!", delete_after=5)
+                        await message.reply(f"❌ Guess must be between {current_giveaway.low}-{current_giveaway.high}!", delete_after=5)
                     except:
                         pass
                     return
                 
                 # Check if guess is correct
-                if guess == current_giveaway['number']:
-                    current_giveaway.setdefault('winners', set()).add(message.author)
+                if current_giveaway.check_guess(message.author, guess):
+                    current_giveaway.winners.add(message.author)
                     
                     # DM the winner
                     try:
                         await message.author.send(
                             f"🎉 You guessed the correct number `{guess}`!\n"
-                            f"Please contact <@{current_giveaway['host_id']}> to claim your prize."
+                            f"Please contact {current_giveaway.hoster.mention} to claim your prize."
                         )
                     except:
                         await message.channel.send(
-                            f"🎉 <@{message.author.id}> guessed correctly but can't receive DMs. Please contact the host!"
+                            f"🎉 {message.author.mention} guessed correctly but can't receive DMs. Please contact the host!"
                         )
                     
-                    # End the giveaway
-                    await message.channel.set_permissions(message.guild.default_role, send_messages=False)
-                    await message.channel.edit(slowmode_delay=0)
-                    await message.channel.send(
-                        f"🏆 Giveaway ended! {message.author.mention} guessed the correct number `{guess}`!"
-                    )
-                    del active_giveaways[message.channel.id]
+                    # Check if we have enough winners
+                    if len(current_giveaway.winners) >= current_giveaway.winners_required:
+                        await end_giveaway(current_giveaway)
                 
                 else:
                     # Optional: Add reaction to show guess was received
