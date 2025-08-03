@@ -423,41 +423,67 @@ class GuessModal(discord.ui.Modal):
         self.giveaway = giveaway
         self.guess = discord.ui.TextInput(
             label=f"Guess a number between {self.giveaway.low}-{self.giveaway.high}",
-            placeholder="Enter your guess here...",
-            min_length=1,
-            max_length=10
+            placeholder=f"Enter a number between {self.giveaway.low}-{self.giveaway.high}...",
+            min_length=len(str(self.giveaway.low)),
+            max_length=len(str(self.giveaway.high))),
+            required=True
         )
         self.add_item(self.guess)
     
     async def on_submit(self, interaction: discord.Interaction):
         try:
             guess = int(self.guess.value)
-            if guess < self.giveaway.low or guess > self.giveaway.high:
-                return await interaction.followup.send(
+            
+            # Check if giveaway is still active
+            if interaction.channel.id not in active_giveaways:
+                return await interaction.response.send_message(
+                    "❌ This giveaway has ended!",
+                    ephemeral=True
+                )
+            
+            # Range validation
+            if not (self.giveaway.low <= guess <= self.giveaway.high):
+                return await interaction.response.send_message(
                     f"❌ Guess must be between {self.giveaway.low} and {self.giveaway.high}!",
                     ephemeral=True
                 )
             
-            correct = self.giveaway.check_guess(interaction.user, guess)
-            if correct is None:
-                return
+            # Check if user already won
+            if interaction.user in self.giveaway.winners:
+                return await interaction.response.send_message(
+                    "🎉 You've already won this giveaway!",
+                    ephemeral=True
+                )
             
-            if correct:
+            # Process the guess
+            if guess == self.giveaway.target:
                 self.giveaway.winners.add(interaction.user)
+                
+                # Send win confirmation
+                win_embed = discord.Embed(
+                    title="🎉 Correct Guess!",
+                    description=f"You guessed the correct number: {guess}",
+                    color=discord.Color.green()
+                )
+                await interaction.response.send_message(embed=win_embed, ephemeral=True)
+                
+                # Notify in giveaway channel
+                win_msg = await self.giveaway.channel.send(
+                    f"🏆 {interaction.user.mention} guessed correctly! "
+                    f"(Number: ||{guess}||)"
+                )
+                
+                # Check if we have enough winners
                 if len(self.giveaway.winners) >= self.giveaway.winners_required:
                     await end_giveaway(self.giveaway)
-                else:
-                    await interaction.followup.send(
-                        "🎉 Correct guess! You're a winner!",
-                        ephemeral=True
-                    )
             else:
-                await interaction.followup.send(
+                await interaction.response.send_message(
                     "❌ Incorrect guess, try again!",
                     ephemeral=True
                 )
+                
         except ValueError:
-            await interaction.followup.send(
+            await interaction.response.send_message(
                 "❌ Please enter a valid number!",
                 ephemeral=True
             )
@@ -1761,21 +1787,30 @@ async def cleanup_expired():
 
 @tree.command(name="giveaway", description="Start a number guessing giveaway")
 @app_commands.describe(
+    prize="Prize for the giveaway",
     author="User hosting the giveaway",
     number_range="Range for guessing (e.g. 1-100)",
     duration="How long the giveaway lasts (e.g. 1m, 30s, 2h)",
+    winners="Number of winners needed (default: 1)",
     target="Optional target user"
 )
 @app_commands.checks.has_any_role(*ADMIN_ROLE_IDS)
 async def giveaway(
     interaction: discord.Interaction,
+    prize: str,
     author: discord.User,
     number_range: str,
     duration: str,
+    winners: Optional[int] = 1,
     target: Optional[discord.User] = None
 ):
     if interaction.channel.id != 1363495611995001013:
         await interaction.response.send_message("This command can only be used in the giveaway channel.", ephemeral=True)
+        return
+
+    # Validate winners count
+    if winners < 1:
+        await interaction.response.send_message("❌ Number of winners must be at least 1.", ephemeral=True)
         return
 
     # Parse range like "1-100"
@@ -1793,55 +1828,56 @@ async def giveaway(
         time_unit = duration[-1]
         time_value = int(duration[:-1])
         duration_seconds = time_value * time_units[time_unit]
+        duration_minutes = duration_seconds // 60
     except:
         await interaction.response.send_message("❌ Invalid duration. Use `30s`, `1m`, `2h` etc.", ephemeral=True)
         return
 
-    # Generate random number
-    secret_number = random.randint(start, end)
+    # Generate random target number
+    target_number = random.randint(start, end)
 
+    # Create the giveaway object
+    giveaway = Giveaway(
+        hoster=author,
+        prize=prize,
+        winners=winners,
+        number_range=(start, end),
+        target=target_number,  # The secret number to guess
+        duration=duration_minutes,
+        channel=interaction.channel
+    )
+    
     # Store giveaway
-    active_giveaways[interaction.channel.id] = {
-        "number": secret_number,
-        "host_id": author.id,
-        "executor_id": interaction.user.id,
-        "participants": set(),
-        "range": number_range,
-        "expires": time.time() + duration_seconds,
-        "winners": set()
-    }
+    active_giveaways[interaction.channel.id] = giveaway
 
     # Open the channel + set slowmode
     await interaction.channel.set_permissions(interaction.guild.default_role, send_messages=True)
-    await interaction.channel.edit(slowmode_delay=5)
+    await interaction.channel.edit(slowmode_delay=2)
 
     # Build embed
     embed = discord.Embed(
-        title="🎁 Number Giveaway Started!",
+        title="🎁 NUMBER GUESS GIVEAWAY",
         description=(
             f"**Host:** {author.mention}\n"
             f"**Range:** {number_range}\n"
+            f"**Prize:** {prize}\n"
+            f"**Winners Needed:** {winners}\n"
             f"**Duration:** {duration}\n\n"
-            "Type a number in this channel to guess!\n"
-            "Cooldown: 5 seconds per guess."
+            "Click the button below to enter your guess!"
         ),
-        color=discord.Color.green()
+        color=discord.Color.gold()
     )
 
     if target:
-        embed.add_field(name="🎯 Target", value=target.mention)
+        embed.add_field(name="🎯 Target Player", value=target.mention)
 
-    await interaction.response.send_message(embed=embed)
+    # Send the message with the button
+    view = GiveawayView(giveaway)
+    await interaction.response.send_message(embed=embed, view=view)
 
-    # Wait for giveaway to end
-    await asyncio.sleep(duration_seconds)
-
-    # If not ended early
-    if interaction.channel.id in active_giveaways:
-        del active_giveaways[interaction.channel.id]
-        await interaction.channel.set_permissions(interaction.guild.default_role, send_messages=False)
-        await interaction.channel.edit(slowmode_delay=0)
-        await interaction.channel.send("⏰ The giveaway has ended. No one guessed the correct number.")
+    # Schedule the giveaway end
+    if duration_minutes > 0:
+        giveaway.task = asyncio.create_task(schedule_giveaway_end(giveaway))
 
 @bot.event
 async def on_message(message):
