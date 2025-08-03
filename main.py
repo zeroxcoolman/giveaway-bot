@@ -879,28 +879,6 @@ class ShovelConfirmView(discord.ui.View):
         self.stop()
         await interaction.followup.send("🚫 Removal cancelled.", ephemeral=True)
 
-class Giveaway:
-    def __init__(self, hoster, prize, winners, number_range, target, duration, channel):
-        self.hoster = hoster
-        self.prize = prize
-        self.winners_required = winners
-        self.low, self.high = number_range
-        self.target = target
-        self.duration = duration
-        self.channel = channel
-        self.winners = set()
-        self.guessed_users = {}
-        self.end_time = asyncio.get_event_loop().time() + (duration * 60 if duration > 0 else float('inf'))
-        self.task = None
-
-    def check_guess(self, user, guess):
-        if user.id == self.hoster.id:
-            return None
-        if user.id not in self.guessed_users:
-            self.guessed_users[user.id] = []
-        self.guessed_users[user.id].append(guess)
-        return guess == self.target
-
 class GrowingSeed:
     def __init__(self, name, grow_duration, mutation=None, limited=False, allowed_mutations=None):
         self.name = name
