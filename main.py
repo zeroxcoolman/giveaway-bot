@@ -498,7 +498,7 @@ class GiveawayView(discord.ui.View):
     async def view_participants(self, interaction: discord.Interaction, button: discord.ui.Button):
         """Show paginated list of participants"""
         participants = list(self.giveaway.participants)
-        total_pages = max(1, (len(participants) + 9) // 10  # 10 per page
+        total_pages = max(1, (len(participants) + 9) // 10)  # 10 per page
         
         if not participants:
             embed = discord.Embed(
