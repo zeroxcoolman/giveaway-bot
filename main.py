@@ -423,28 +423,34 @@ class Giveaway:
         self.task = None
 
     def check_guess(self, user, guess):
-        if user.id == self.hoster.id:
+        if time.time() > self.end_time:
+            return None  # Giveaway has ended
+            
+        if user.id == self.hoster.id:  # Host can't participate
             return None
         if user.id not in self.guessed_users:
             self.guessed_users[user.id] = []
-            self.guesses[user.id] = []  # Mirror for compatibility
         self.guessed_users[user.id].append(guess)
-        self.guesses[user.id].append(guess)  # Mirror for compatibility
-        self.participants.add(user)  # Track participation
         return guess == self.target
 
 class GuessModal(discord.ui.Modal, title='Enter Your Guess'):
-    guess = discord.ui.TextInput(label='Your guess', placeholder='Enter a number between X and Y')
+    guess = discord.ui.TextInput(label='Your guess', placeholder=f'Enter a number between X and Y')
     
     def __init__(self, giveaway: Giveaway):
         super().__init__()
         self.giveaway = giveaway
     
     async def on_submit(self, interaction: discord.Interaction):
-        # Prevent host from guessing
+        # Check host
         if interaction.user.id == self.giveaway.hoster.id:
             return await interaction.response.send_message(
                 "❌ You can't participate in your own giveaway!",
+                ephemeral=True
+            )
+        # Check if giveaway has ended
+        if time.time() > self.giveaway.end_time:
+            return await interaction.response.send_message(
+                "❌ This giveaway has already ended!",
                 ephemeral=True
             )
         
@@ -493,6 +499,7 @@ class GiveawayView(discord.ui.View):
     
     @discord.ui.button(label="Join Giveaway", style=discord.ButtonStyle.green, custom_id="join_giveaway")
     async def join_giveaway(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # Check if giveaway has ended
         if time.time() > self.giveaway.end_time:
             return await interaction.response.send_message(
                 "❌ This giveaway has already ended!",
@@ -972,26 +979,73 @@ async def on_ready():
         print(f"Failed to sync: {e}")
 
 async def end_giveaway(giveaway):
+    # Cancel any scheduled tasks first
     if giveaway.task:
         giveaway.task.cancel()
 
+    # Disable the giveaway view buttons if it exists
+    if hasattr(giveaway, 'view') and giveaway.view:
+        for item in giveaway.view.children:
+            item.disabled = True
+        try:
+            if hasattr(giveaway.view, 'message') and giveaway.view.message:
+                await giveaway.view.message.edit(view=giveaway.view)
+        except discord.NotFound:
+            pass  # Message was already deleted
+
+    # Notify winners
     for winner in giveaway.winners:
         try:
             await winner.send(
-                f"🎉 You won the giveaway in {giveaway.channel.mention}!\n**Prize:** {giveaway.prize}\nContact {giveaway.hoster.mention} to claim your reward!"
+                f"🎉 You won the giveaway in {giveaway.channel.mention}!\n"
+                f"**Prize:** {giveaway.prize}\n"
+                f"Contact {giveaway.hoster.mention} to claim your reward!"
             )
-        except:
-            pass
+        except discord.Forbidden:
+            try:
+                await giveaway.channel.send(
+                    f"{winner.mention} won but can't receive DMs! "
+                    f"Please contact {giveaway.hoster.mention} to claim your prize."
+                )
+            except:
+                pass  # Fallback if we can't notify in channel either
 
+    # Create results embed
     winners_text = ", ".join(w.mention for w in giveaway.winners) if giveaway.winners else "No winners"
     embed = discord.Embed(
         title="🎉 Giveaway Ended",
-        description=f"**Prize:** {giveaway.prize}\n**Target:** {giveaway.target}\n**Winners:** {winners_text}",
+        description=(
+            f"**Prize:** {giveaway.prize}\n"
+            f"**Target Number:** ||{giveaway.target}||\n"
+            f"**Winners:** {winners_text}\n"
+            f"**Total Participants:** {len(giveaway.guessed_users)}"
+        ),
         color=discord.Color.green()
     )
-    await giveaway.channel.send(embed=embed)
-    await giveaway.channel.set_permissions(giveaway.channel.guild.default_role, send_messages=False)
-    active_giveaways.pop(giveaway.channel.id, None)
+
+    # Send results and clean up
+    try:
+        await giveaway.channel.send(embed=embed)
+        await giveaway.channel.set_permissions(
+            giveaway.channel.guild.default_role,
+            send_messages=False
+        )
+        await giveaway.channel.edit(slowmode_delay=0)
+    except discord.Forbidden:
+        pass  # Missing permissions - we tried our best
+
+    # Remove from active giveaways
+    if giveaway.channel.id in active_giveaways:
+        active_giveaways.pop(giveaway.channel.id)
+
+    # Optional: Log the giveaway results
+    giveaway_logs.append({
+        'channel_id': giveaway.channel.id,
+        'hoster_id': giveaway.hoster.id,
+        'prize': giveaway.prize,
+        'winners': [w.id for w in giveaway.winners],
+        'end_time': time.time()
+    })
 
 @tree.command(name="add_limited_seed")
 @auto_defer(ephemeral=True)
@@ -2082,17 +2136,15 @@ async def on_message(message):
     # Handle giveaway messages
     current_giveaway = active_giveaways.get(message.channel.id)
     if current_giveaway:
-        # Prevent host from guessing
-        if message.author.id == current_giveaway.hoster.id:
-            if message.content.strip().isdigit():
-                try:
-                    await message.delete()
-                    await message.author.send("❌ You can't participate in your own giveaway!", delete_after=10)
-                except:
-                    pass
-            return  # Skip processing host's messages
+        # Check if giveaway has ended
+        if time.time() > current_giveaway.end_time:
+            try:
+                await message.delete()
+                await message.author.send("❌ This giveaway has already ended!", delete_after=10)
+            except:
+                pass
+            return
 
-        # Rest of the giveaway handling logic...
         if message.content.strip().isdigit():
             try:
                 guess = int(message.content.strip())
