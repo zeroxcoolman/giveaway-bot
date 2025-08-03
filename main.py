@@ -596,6 +596,11 @@ class ParticipantsView(discord.ui.View):
         # Disable navigation buttons when appropriate
         self.prev_button.disabled = current_page == 0
         self.next_button.disabled = current_page >= total_pages - 1
+        
+        if time.time() > self.giveaway.end_time:
+            for item in self.children:
+                if isinstance(item, discord.ui.Button) and item.custom_id == "join_giveaway":
+                    item.disabled = True
     
     @discord.ui.button(label="◀ Previous", style=discord.ButtonStyle.gray)
     async def prev_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -987,6 +992,9 @@ def has_admin_role(member):
 @bot.event
 async def on_ready():
     print(f"Logged in as {bot.user} (ID: {bot.user.id})")
+    for giveaway in active_giveaways.values():
+        if hasattr(giveaway, 'view') and giveaway.view:
+            bot.add_view(giveaway.view, message_id=giveaway.view.message.id)
     bot.add_view(CloseTicketView(bot))
     refresh_stock.start()
 
@@ -2134,6 +2142,7 @@ async def giveaway(
     # Create and send the view
     view = GiveawayView(giveaway)
     
+    
     # Send the message and store the reference
     if interaction.response.is_done():
         message = await interaction.followup.send(embed=embed, view=view)
@@ -2142,6 +2151,7 @@ async def giveaway(
         message = await interaction.original_response()
     
     view.message = message
+    giveaway.view = view
 
     # Schedule the giveaway end
     if duration_minutes > 0:
