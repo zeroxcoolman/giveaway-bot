@@ -425,7 +425,7 @@ class GuessModal(discord.ui.Modal):
             label=f"Guess a number between {self.giveaway.low}-{self.giveaway.high}",
             placeholder=f"Enter a number between {self.giveaway.low}-{self.giveaway.high}...",
             min_length=len(str(self.giveaway.low)),
-            max_length=len(str(self.giveaway.high))),
+            max_length=len(str(self.giveaway.high)),
             required=True
         )
         self.add_item(self.guess)
@@ -985,16 +985,89 @@ async def schedule_giveaway_end(giveaway):
 @tree.command(name="stop_giveaway")
 @auto_defer(ephemeral=True)
 async def stop_giveaway(interaction: discord.Interaction):
-    if not interaction.response.is_done():
-        await interaction.response.defer()
+    """Forcefully end the current giveaway in this channel"""
     giveaway = active_giveaways.get(interaction.channel.id)
+    
     if not giveaway:
-        return await interaction.followup.send("❌ No active giveaway", ephemeral=True)
+        return await interaction.followup.send("❌ No active giveaway in this channel!", ephemeral=True)
+    
+    # Check permissions - host or admin can stop
     if interaction.user.id != giveaway.hoster.id and not has_admin_role(interaction.user):
-        return await interaction.followup.send("❌ Not allowed", ephemeral=True)
-    await interaction.followup.send("🛑 Ending giveaway...")
-    await end_giveaway(giveaway)
-
+        return await interaction.followup.send(
+            "❌ Only the giveaway host or admins can stop this!",
+            ephemeral=True
+        )
+    
+    # Build results embed
+    embed = discord.Embed(
+        title="🎉 Giveaway Ended by Admin",
+        color=discord.Color.orange()
+    )
+    
+    # Add basic info
+    embed.add_field(
+        name="Giveaway Details",
+        value=(
+            f"**Host:** {giveaway.hoster.mention}\n"
+            f"**Range:** {giveaway.low}-{giveaway.high}\n"
+            f"**Prize:** {giveaway.prize}\n"
+            f"**Target Number:** ||{giveaway.target}||"
+        ),
+        inline=False
+    )
+    
+    # Add winners if any
+    if giveaway.winners:
+        winners_text = ", ".join(winner.mention for winner in giveaway.winners)
+        embed.add_field(
+            name=f"🏆 Winner{'s' if len(giveaway.winners) > 1 else ''}",
+            value=winners_text or "No winners yet",
+            inline=False
+        )
+    else:
+        embed.add_field(
+            name="❌ No Winners",
+            value="No one guessed the correct number!",
+            inline=False
+        )
+    
+    # Cancel the scheduled end task if it exists
+    if giveaway.task:
+        giveaway.task.cancel()
+    
+    # Clean up channel permissions
+    await interaction.channel.set_permissions(
+        interaction.guild.default_role,
+        send_messages=False
+    )
+    await interaction.channel.edit(slowmode_delay=0)
+    
+    # Remove from active giveaways
+    active_giveaways.pop(interaction.channel.id, None)
+    
+    # Send the results
+    await interaction.followup.send(embed=embed)
+    
+    # DM the host with full results
+    try:
+        host_embed = discord.Embed(
+            title="🎁 Giveaway Stopped",
+            description=f"Your giveaway in {interaction.channel.mention} was ended by {interaction.user.mention}",
+            color=discord.Color.blue()
+        )
+        host_embed.add_field(
+            name="Results",
+            value=(
+                f"Winners: {len(giveaway.winners)}\n"
+                f"Total Participants: {len(giveaway.guessed_users) if hasattr(giveaway, 'guessed_users') else 'Unknown'}"
+            )
+        )
+        await giveaway.hoster.send(embed=host_embed)
+    except discord.Forbidden:
+        pass  # Host has DMs disabled
+        
+        
+        
 @tree.command(name="inventory")
 @auto_defer(ephemeral=True)
 async def inventory(interaction: discord.Interaction):
