@@ -413,9 +413,12 @@ class Giveaway:
         self.low, self.high = number_range
         self.target = target
         self.duration = duration
+        self.duration_minutes = duration  # Add this line to match the embed reference
         self.channel = channel
         self.winners = set()
-        self.guessed_users = {}
+        self.participants = set()  # Track who joined
+        self.guessed_users = {}    # Track guesses per user
+        self.guesses = {}          # Alternative name for guessed_users for compatibility
         self.end_time = time.time() + (duration * 60) if duration > 0 else float('inf')
         self.task = None
 
@@ -424,8 +427,54 @@ class Giveaway:
             return None
         if user.id not in self.guessed_users:
             self.guessed_users[user.id] = []
+            self.guesses[user.id] = []  # Mirror for compatibility
         self.guessed_users[user.id].append(guess)
+        self.guesses[user.id].append(guess)  # Mirror for compatibility
+        self.participants.add(user)  # Track participation
         return guess == self.target
+
+class GuessModal(discord.ui.Modal, title="Enter Your Guess"):
+    guess = discord.ui.TextInput(
+        label=f"Enter a number between {giveaway.low} and {giveaway.high}",
+        placeholder="Your guess...",
+        min_length=1,
+        max_length=10
+    )
+
+    def __init__(self, giveaway):
+        super().__init__()
+        self.giveaway = giveaway
+
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            guess = int(self.guess.value)
+            if guess < self.giveaway.low or guess > self.giveaway.high:
+                return await interaction.response.send_message(
+                    f"❌ Guess must be between {self.giveaway.low}-{self.giveaway.high}!",
+                    ephemeral=True
+                )
+            
+            # Check if the guess is correct
+            is_correct = self.giveaway.check_guess(interaction.user, guess)
+            
+            if is_correct:
+                self.giveaway.winners.add(interaction.user)
+                await interaction.response.send_message(
+                    f"🎉 Correct! You guessed the number {guess}!",
+                    ephemeral=True
+                )
+                
+                # Check if we have enough winners
+                if len(self.giveaway.winners) >= self.giveaway.winners_required:
+                    await end_giveaway(self.giveaway)
+            else:
+                await interaction.response.send_message(
+                    f"❌ {guess} is not the correct number. Try again!",
+                    ephemeral=True
+                )
+                
+        except ValueError:
+            await interaction.response.send_message("❌ Please enter a valid number!", ephemeral=True)
 
 class GiveawayView(discord.ui.View):
     def __init__(self, giveaway: Giveaway):
@@ -493,63 +542,26 @@ class GiveawayView(discord.ui.View):
         return embed
 
 def create_giveaway_embed(giveaway: Giveaway) -> discord.Embed:
-    """Creates an embed for the giveaway with all relevant information"""
     embed = discord.Embed(
         title="🎉 NUMBER GUESS GIVEAWAY 🎉",
         description=f"Hosted by {giveaway.hoster.mention}",
         color=discord.Color.gold()
     )
     
-    # Main prize information
-    embed.add_field(
-        name="🏆 Prize",
-        value=giveaway.prize,
-        inline=False
-    )
+    embed.add_field(name="🏆 Prize", value=giveaway.prize, inline=False)
+    embed.add_field(name="🔢 Number Range", value=f"{giveaway.low}-{giveaway.high}", inline=True)
+    embed.add_field(name="🎯 Winners Needed", value=str(giveaway.winners_required), inline=True)
     
-    # Game details
-    embed.add_field(
-        name="🔢 Number Range",
-        value=f"{giveaway.low}-{giveaway.high}",
-        inline=True
-    )
-    
-    embed.add_field(
-        name="🎯 Winners Needed",
-        value=str(giveaway.winners_required),
-        inline=True
-    )
-    
-    # Time information
     if giveaway.duration_minutes > 0:
         remaining = max(0, giveaway.end_time - time.time())
         mins, secs = divmod(int(remaining), 60)
-        embed.add_field(
-            name="⏳ Time Remaining",
-            value=f"{mins}m {secs}s",
-            inline=True
-        )
+        embed.add_field(name="⏳ Time Remaining", value=f"{mins}m {secs}s", inline=True)
     else:
-        embed.add_field(
-            name="⏳ Duration",
-            value="No time limit",
-            inline=True
-        )
+        embed.add_field(name="⏳ Duration", value="No time limit", inline=True)
     
-    # Participation stats
-    embed.add_field(
-        name="👥 Participants",
-        value=f"{len(giveaway.participants)} joined",
-        inline=True
-    )
+    embed.add_field(name="👥 Participants", value=f"{len(giveaway.participants)} joined", inline=True)
+    embed.add_field(name="🏆 Winners Found", value=f"{len(giveaway.winners)}/{giveaway.winners_required}", inline=True)
     
-    embed.add_field(
-        name="🏆 Winners Found",
-        value=f"{len(giveaway.winners)}/{giveaway.winners_required}",
-        inline=True
-    )
-    
-    # Footer with instructions
     embed.set_footer(
         text="Click 'Join Giveaway' to participate!",
         icon_url=giveaway.hoster.display_avatar.url
