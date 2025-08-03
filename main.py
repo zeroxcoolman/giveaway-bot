@@ -435,7 +435,7 @@ class Giveaway:
 
 class GuessModal(discord.ui.Modal, title="Enter Your Guess"):
     guess = discord.ui.TextInput(
-        label=f"Enter a number between {giveaway.low} and {giveaway.high}",
+        label="Enter your guess",  # Generic label, will update in __init__
         placeholder="Your guess...",
         min_length=1,
         max_length=10
@@ -444,6 +444,8 @@ class GuessModal(discord.ui.Modal, title="Enter Your Guess"):
     def __init__(self, giveaway):
         super().__init__()
         self.giveaway = giveaway
+        # Update the label dynamically
+        self.guess.label = f"Enter a number between {giveaway.low} and {giveaway.high}"
 
     async def on_submit(self, interaction: discord.Interaction):
         try:
