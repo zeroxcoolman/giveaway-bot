@@ -405,88 +405,192 @@ class TradeView(View):
         except:
             pass
 
-class GiveawayView(View):
-    def __init__(self, giveaway):
-        super().__init__(timeout=None)  # Persistent view
-        self.giveaway = giveaway
+def create_giveaway_embed(giveaway: Giveaway) -> discord.Embed:
+    """Creates an embed for the giveaway with all relevant information"""
+    embed = discord.Embed(
+        title="🎉 NUMBER GUESS GIVEAWAY 🎉",
+        description=f"Hosted by {giveaway.hoster.mention}",
+        color=discord.Color.gold()
+    )
     
-    @discord.ui.button(label="Join Giveaway", style=ButtonStyle.green, custom_id="join_giveaway")
-    async def join_giveaway(self, interaction: discord.Interaction, button: Button):
-        if interaction.channel.id != self.giveaway.channel.id:
-            return await interaction.followup.send("❌ This button only works in the giveaway channel!", ephemeral=True)
-        
-        await interaction.response.send_modal(GuessModal(self.giveaway))
-
-class GuessModal(discord.ui.Modal):
-    def __init__(self, giveaway):
-        super().__init__(title="Enter Your Guess")
-        self.giveaway = giveaway
-        self.guess = discord.ui.TextInput(
-            label=f"Guess a number between {self.giveaway.low}-{self.giveaway.high}",
-            placeholder=f"Enter a number between {self.giveaway.low}-{self.giveaway.high}...",
-            min_length=len(str(self.giveaway.low)),
-            max_length=len(str(self.giveaway.high)),
-            required=True
+    # Main prize information
+    embed.add_field(
+        name="🏆 Prize",
+        value=giveaway.prize,
+        inline=False
+    )
+    
+    # Game details
+    embed.add_field(
+        name="🔢 Number Range",
+        value=f"{giveaway.low}-{giveaway.high}",
+        inline=True
+    )
+    
+    embed.add_field(
+        name="🎯 Winners Needed",
+        value=str(giveaway.winners_required),
+        inline=True
+    )
+    
+    # Time information
+    if giveaway.duration_minutes > 0:
+        remaining = max(0, giveaway.end_time - time.time())
+        mins, secs = divmod(int(remaining), 60)
+        embed.add_field(
+            name="⏳ Time Remaining",
+            value=f"{mins}m {secs}s",
+            inline=True
         )
-        self.add_item(self.guess)
+    else:
+        embed.add_field(
+            name="⏳ Duration",
+            value="No time limit",
+            inline=True
+        )
     
-    async def on_submit(self, interaction: discord.Interaction):
-        try:
-            guess = int(self.guess.value)
-            
-            # Check if giveaway is still active
-            if interaction.channel.id not in active_giveaways:
-                return await interaction.response.send_message(
-                    "❌ This giveaway has ended!",
-                    ephemeral=True
-                )
-            
-            # Range validation
-            if not (self.giveaway.low <= guess <= self.giveaway.high):
-                return await interaction.response.send_message(
-                    f"❌ Guess must be between {self.giveaway.low} and {self.giveaway.high}!",
-                    ephemeral=True
-                )
-            
-            # Check if user already won
-            if interaction.user in self.giveaway.winners:
-                return await interaction.response.send_message(
-                    "🎉 You've already won this giveaway!",
-                    ephemeral=True
-                )
-            
-            # Process the guess
-            if guess == self.giveaway.target:
-                self.giveaway.winners.add(interaction.user)
-                
-                # Send win confirmation
-                win_embed = discord.Embed(
-                    title="🎉 Correct Guess!",
-                    description=f"You guessed the correct number: {guess}",
-                    color=discord.Color.green()
-                )
-                await interaction.response.send_message(embed=win_embed, ephemeral=True)
-                
-                # Notify in giveaway channel
-                win_msg = await self.giveaway.channel.send(
-                    f"🏆 {interaction.user.mention} guessed correctly! "
-                    f"(Number: ||{guess}||)"
-                )
-                
-                # Check if we have enough winners
-                if len(self.giveaway.winners) >= self.giveaway.winners_required:
-                    await end_giveaway(self.giveaway)
-            else:
-                await interaction.response.send_message(
-                    "❌ Incorrect guess, try again!",
-                    ephemeral=True
-                )
-                
-        except ValueError:
-            await interaction.response.send_message(
-                "❌ Please enter a valid number!",
-                ephemeral=True
+    # Participation stats
+    embed.add_field(
+        name="👥 Participants",
+        value=f"{len(giveaway.participants)} joined",
+        inline=True
+    )
+    
+    embed.add_field(
+        name="🏆 Winners Found",
+        value=f"{len(giveaway.winners)}/{giveaway.winners_required}",
+        inline=True
+    )
+    
+    # Footer with instructions
+    embed.set_footer(
+        text="Click 'Join Giveaway' to participate!",
+        icon_url=giveaway.hoster.display_avatar.url
+    )
+    
+    return embed
+
+
+class GiveawayView(discord.ui.View):
+    def __init__(self, giveaway: Giveaway):
+        super().__init__(timeout=None)
+        self.giveaway = giveaway
+    
+    @discord.ui.button(label="Join Giveaway", style=discord.ButtonStyle.green, custom_id="join_giveaway")
+    async def join_giveaway(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(GuessModal(self.giveaway))
+    
+    @discord.ui.button(label="Participants", style=discord.ButtonStyle.blurple, custom_id="view_participants")
+    async def view_participants(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """Show paginated list of participants"""
+        participants = list(self.giveaway.participants)
+        total_pages = max(1, (len(participants) + 9) // 10)  # 10 per page
+        
+        if not participants:
+            embed = discord.Embed(
+                title="Giveaway Participants",
+                description="No participants yet!",
+                color=discord.Color.blue()
             )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            return
+        
+        # Create initial participants embed (page 0)
+        embed = self.create_participants_embed(participants, 0, total_pages)
+        view = ParticipantsView(self.giveaway, participants, 0, total_pages)
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+    
+    @discord.ui.button(label="My Guesses", style=discord.ButtonStyle.gray, custom_id="my_guesses")
+    async def my_guesses(self, interaction: discord.Interaction, button: discord.ui.Button):
+        guesses = self.giveaway.guesses.get(interaction.user.id, [])
+        embed = discord.Embed(
+            title="Your Guesses",
+            color=discord.Color.blue()
+        )
+        
+        if not guesses:
+            embed.description = "You haven't made any guesses yet!"
+        else:
+            embed.description = "\n".join(f"• {guess}" for guess in guesses)
+            embed.set_footer(text=f"Total guesses: {len(guesses)}")
+        
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+    
+    def create_participants_embed(self, participants: list, page: int, total_pages: int) -> discord.Embed:
+        """Helper function to create participants embed for a specific page"""
+        start_idx = page * 10
+        end_idx = min(start_idx + 10, len(participants))
+        
+        embed = discord.Embed(
+            title=f"Giveaway Participants (Page {page + 1}/{total_pages})",
+            color=discord.Color.blue()
+        )
+        
+        participant_list = []
+        for i in range(start_idx, end_idx):
+            participant = participants[i]
+            participant_list.append(f"{i + 1}. {participant.mention}")
+        
+        embed.description = "\n".join(participant_list) or "No participants on this page"
+        embed.set_footer(text=f"Total participants: {len(participants)}")
+        
+        return embed
+
+
+class ParticipantsView(discord.ui.View):
+    def __init__(self, giveaway: Giveaway, participants: list, current_page: int, total_pages: int):
+        super().__init__(timeout=60)
+        self.giveaway = giveaway
+        self.participants = participants
+        self.current_page = current_page
+        self.total_pages = total_pages
+        
+        # Disable navigation buttons when appropriate
+        self.prev_button.disabled = current_page == 0
+        self.next_button.disabled = current_page >= total_pages - 1
+    
+    @discord.ui.button(label="◀ Previous", style=discord.ButtonStyle.gray)
+    async def prev_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.current_page > 0:
+            self.current_page -= 1
+            await self.update_view(interaction)
+    
+    @discord.ui.button(label="Back", style=discord.ButtonStyle.blurple)
+    async def back_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # Return to main giveaway view
+        embed = create_giveaway_embed(self.giveaway)
+        view = GiveawayView(self.giveaway)
+        await interaction.response.edit_message(embed=embed, view=view)
+    
+    @discord.ui.button(label="Next ▶", style=discord.ButtonStyle.gray)
+    async def next_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.current_page < self.total_pages - 1:
+            self.current_page += 1
+            await self.update_view(interaction)
+    
+    async def update_view(self, interaction: discord.Interaction):
+        """Update the message with the new page"""
+        embed = GiveawayView(self.giveaway).create_participants_embed(
+            self.participants,
+            self.current_page,
+            self.total_pages
+        )
+        
+        # Update button states
+        self.prev_button.disabled = self.current_page == 0
+        self.next_button.disabled = self.current_page >= self.total_pages - 1
+        
+        await interaction.response.edit_message(embed=embed, view=self)
+    
+    async def on_timeout(self):
+        """Disable all buttons when view times out"""
+        for item in self.children:
+            item.disabled = True
+        try:
+            await self.message.edit(view=self)
+        except discord.NotFound:
+            pass  # Message was already deleted
+
 
 class ConfirmView(View):
     def __init__(self):
@@ -1957,7 +2061,7 @@ async def on_message(message):
     if message.author.bot:
         return
 
-    # Always increment message count for sheckles
+    # Message counting for sheckles
     user_message_counts[message.author.id] += 1
     if user_message_counts[message.author.id] % MESSAGES_PER_SHECKLE == 0:
         user_sheckles[message.author.id] += 1
@@ -1965,8 +2069,8 @@ async def on_message(message):
     # Handle giveaway messages
     current_giveaway = active_giveaways.get(message.channel.id)
     if current_giveaway:
-        # Host can say anything except numbers
-        if message.author.id == current_giveaway['host_id']:
+        # Use object attributes instead of dictionary keys
+        if message.author.id == current_giveaway.hoster.id:
             if message.content.strip().isdigit():
                 try:
                     await message.delete()
