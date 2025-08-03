@@ -731,7 +731,9 @@ class Giveaway:
     def check_guess(self, user, guess):
         if user.id == self.hoster.id:
             return None
-        self.guessed_users[user.id] = guess
+        if user.id not in self.guessed_users:
+            self.guessed_users[user.id] = []
+        self.guessed_users[user.id].append(guess)
         return guess == self.target
 
 class GrowingSeed:
