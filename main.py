@@ -499,17 +499,22 @@ class GiveawayView(discord.ui.View):
     def __init__(self, giveaway: Giveaway):
         super().__init__(timeout=None)
         self.giveaway = giveaway
-        self.message = None  # Will store our message reference
+        self.message = None  # Will be set externally when message is sent
+
+        # Disable buttons immediately if giveaway has already ended
+        if time.time() > giveaway.end_time:
+            self.disable_expired_buttons()
 
     def disable_expired_buttons(self):
-        for child in self.children:
-            if isinstance(child, discord.ui.Button) and child.custom_id == "join_giveaway":
-                child.disabled = True
+        for item in self.children:
+            if isinstance(item, discord.ui.Button):
+                if item.custom_id == "join_giveaway":
+                    item.disabled = True
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if not self.message:
+        if self.message is None:
             self.message = interaction.message
-        return await super().interaction_check(interaction)
+        return True
 
     @discord.ui.button(label="Join Giveaway", style=discord.ButtonStyle.green, custom_id="join_giveaway")
     async def join_giveaway(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -518,6 +523,7 @@ class GiveawayView(discord.ui.View):
                 "❌ This giveaway has already ended!",
                 ephemeral=True
             )
+
         await interaction.response.send_modal(GuessModal(self.giveaway))
 
     @discord.ui.button(label="Participants", style=discord.ButtonStyle.blurple, custom_id="view_participants")
@@ -531,7 +537,7 @@ class GiveawayView(discord.ui.View):
                 ephemeral=True
             )
 
-        embed = GiveawayView.create_participants_embed(participants, 0, total_pages)
+        embed = create_participants_embed(participants, 0, total_pages)
         view = ParticipantsView(
             giveaway=self.giveaway,
             participants=participants,
@@ -539,37 +545,16 @@ class GiveawayView(discord.ui.View):
             total_pages=total_pages,
             original_view=self
         )
-        view.disable_expired_buttons()  # in case the giveaway ended
-
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
     @discord.ui.button(label="My Guesses", style=discord.ButtonStyle.secondary, custom_id="my_guesses")
     async def my_guesses(self, interaction: discord.Interaction, button: discord.ui.Button):
-        user_guesses = self.giveaway.user_guesses.get(interaction.user.id, [])
-        if not user_guesses:
-            return await interaction.response.send_message(
-                "You haven't made any guesses yet!",
-                ephemeral=True
-            )
+        guesses = self.giveaway.user_guesses.get(interaction.user.id, [])
+        if not guesses:
+            return await interaction.response.send_message("You haven't made any guesses yet!", ephemeral=True)
 
-        guess_list = ', '.join(map(str, user_guesses))
-        await interaction.response.send_message(
-            f"📋 Your guesses: `{guess_list}`",
-            ephemeral=True
-        )
-
-    @staticmethod
-    def create_participants_embed(participants: list, page: int, total_pages: int) -> discord.Embed:
-        start = page * 10
-        end = start + 10
-        page_participants = participants[start:end]
-
-        embed = discord.Embed(
-            title=f"👥 Participants (Page {page + 1}/{total_pages})",
-            description="\n".join(f"{i + 1}. {user.mention}" for i, user in enumerate(page_participants)),
-            color=discord.Color.blurple()
-        )
-        return embed
+        formatted = ', '.join(map(str, guesses))
+        await interaction.response.send_message(f"📋 Your guesses: `{formatted}`", ephemeral=True)
 
 def create_giveaway_embed(giveaway: Giveaway) -> discord.Embed:
     embed = discord.Embed(
