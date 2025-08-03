@@ -484,82 +484,48 @@ class GiveawayView(discord.ui.View):
     def __init__(self, giveaway: Giveaway):
         super().__init__(timeout=None)
         self.giveaway = giveaway
+        self.message = None  # Will store our message reference
     
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if not hasattr(self, 'message'):
+        if not hasattr(self, 'message') or self.message is None:
             self.message = interaction.message
         return await super().interaction_check(interaction)
     
     @discord.ui.button(label="Join Giveaway", style=discord.ButtonStyle.green, custom_id="join_giveaway")
     async def join_giveaway(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if time.time() > self.giveaway.end_time:
+            return await interaction.response.send_message(
+                "❌ This giveaway has already ended!",
+                ephemeral=True
+            )
+        
         await interaction.response.send_modal(GuessModal(self.giveaway))
     
     @discord.ui.button(label="Participants", style=discord.ButtonStyle.blurple, custom_id="view_participants")
     async def view_participants(self, interaction: discord.Interaction, button: discord.ui.Button):
-        """Show paginated list of participants"""
         participants = list(self.giveaway.participants)
         total_pages = max(1, (len(participants) + 9) // 10)  # 10 per page
         
         if not participants:
-            embed = discord.Embed(
-                title="Giveaway Participants",
-                description="No participants yet!",
-                color=discord.Color.blue()
+            return await interaction.response.send_message(
+                "No participants yet!",
+                ephemeral=True
             )
-            await interaction.response.send_message(embed=embed, ephemeral=True)
-            return
         
-        # Create initial participants embed (page 0)
         embed = self.create_participants_embed(participants, 0, total_pages)
         view = ParticipantsView(
             giveaway=self.giveaway,
             participants=participants,
             current_page=0,
             total_pages=total_pages,
-            original_view=self  # Pass the current GiveawayView instance
-        )
-        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
-        
-        # Create initial participants embed (page 0)
-        embed = self.create_participants_embed(participants, 0, total_pages)
-        view = ParticipantsView(self.giveaway, participants, 0, total_pages)
-        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
-    
-    @discord.ui.button(label="My Guesses", style=discord.ButtonStyle.gray, custom_id="my_guesses")
-    async def my_guesses(self, interaction: discord.Interaction, button: discord.ui.Button):
-        guesses = self.giveaway.guesses.get(interaction.user.id, [])
-        embed = discord.Embed(
-            title="Your Guesses",
-            color=discord.Color.blue()
+            original_view=self  # Pass the original view
         )
         
-        if not guesses:
-            embed.description = "You haven't made any guesses yet!"
+        # Only respond if we haven't already
+        if not interaction.response.is_done():
+            await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
         else:
-            embed.description = "\n".join(f"• {guess}" for guess in guesses)
-            embed.set_footer(text=f"Total guesses: {len(guesses)}")
-        
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-    
-    def create_participants_embed(self, participants: list, page: int, total_pages: int) -> discord.Embed:
-        """Helper function to create participants embed for a specific page"""
-        start_idx = page * 10
-        end_idx = min(start_idx + 10, len(participants))
-        
-        embed = discord.Embed(
-            title=f"Giveaway Participants (Page {page + 1}/{total_pages})",
-            color=discord.Color.blue()
-        )
-        
-        participant_list = []
-        for i in range(start_idx, end_idx):
-            participant = participants[i]
-            participant_list.append(f"{i + 1}. {participant.mention}")
-        
-        embed.description = "\n".join(participant_list) or "No participants on this page"
-        embed.set_footer(text=f"Total participants: {len(participants)}")
-        
-        return embed
+            await interaction.followup.send(embed=embed, view=view, ephemeral=True)
 
 def create_giveaway_embed(giveaway: Giveaway) -> discord.Embed:
     embed = discord.Embed(
@@ -596,17 +562,11 @@ class ParticipantsView(discord.ui.View):
         self.participants = participants
         self.current_page = current_page
         self.total_pages = total_pages
-        self.original_view = original_view  # Store the original view reference
+        self.original_view = original_view
         
         # Disable navigation buttons when appropriate
         self.prev_button.disabled = current_page == 0
         self.next_button.disabled = current_page >= total_pages - 1
-    
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        # Store the message reference on first interaction
-        if not hasattr(self, 'message'):
-            self.message = interaction.message
-        return await super().interaction_check(interaction)
     
     @discord.ui.button(label="◀ Previous", style=discord.ButtonStyle.gray)
     async def prev_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -617,12 +577,13 @@ class ParticipantsView(discord.ui.View):
     @discord.ui.button(label="Back", style=discord.ButtonStyle.blurple)
     async def back_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         """Return to the original giveaway view"""
-        if self.original_view:
-            # Rebuild the original embed
+        if self.original_view and hasattr(self.original_view, 'message'):
+            # Edit the original message instead of creating new one
             embed = create_giveaway_embed(self.giveaway)
-            await interaction.response.edit_message(embed=embed, view=self.original_view)
+            await self.original_view.message.edit(embed=embed, view=self.original_view)
+            await interaction.response.defer()  # Acknowledge the interaction
         else:
-            # Fallback if no original view was provided
+            # Fallback if something went wrong
             embed = create_giveaway_embed(self.giveaway)
             view = GiveawayView(self.giveaway)
             await interaction.response.edit_message(embed=embed, view=view)
@@ -655,7 +616,7 @@ class ParticipantsView(discord.ui.View):
             if hasattr(self, 'message'):
                 await self.message.edit(view=self)
         except discord.NotFound:
-            pass  # Message was already deleted
+            pass
 
 
 class ConfirmView(View):
@@ -2063,7 +2024,7 @@ async def giveaway(
         prize=prize,
         winners=winners,
         number_range=(start, end),
-        target=target_number,  # The secret number to guess
+        target=target_number,
         duration=duration_minutes,
         channel=interaction.channel
     )
@@ -2092,9 +2053,17 @@ async def giveaway(
     if target:
         embed.add_field(name="🎯 Target Player", value=target.mention)
 
-    # Send the message with the button
+    # Create and send the view
     view = GiveawayView(giveaway)
-    await interaction.response.send_message(embed=embed, view=view)
+    
+    # Send the message and store the reference
+    if interaction.response.is_done():
+        message = await interaction.followup.send(embed=embed, view=view)
+    else:
+        await interaction.response.send_message(embed=embed, view=view)
+        message = await interaction.original_response()
+    
+    view.message = message
 
     # Schedule the giveaway end
     if duration_minutes > 0:
