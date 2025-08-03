@@ -419,6 +419,7 @@ class Giveaway:
         self.winners = set()
         self.participants = set()
         self.guessed_users = {}
+        self.user_guesses = {}
         self.end_time = time.time() + (duration * 60) if duration > 0 else None  # None for no time limit
         self.task = None
 
@@ -467,6 +468,8 @@ class GuessModal(discord.ui.Modal, title='Enter Your Guess'):
                     f"❌ Guess must be between {self.giveaway.low}-{self.giveaway.high}!",
                     ephemeral=True
                 )
+                
+            self.giveaway.user_guesses.setdefault(interaction.user.id, []).append(guess)
             
             # Check if guess is correct
             if self.giveaway.check_guess(interaction.user, guess):
@@ -497,6 +500,11 @@ class GiveawayView(discord.ui.View):
         super().__init__(timeout=None)
         self.giveaway = giveaway
         self.message = None  # Will store our message reference
+        
+        if time.time() > giveaway.end_time:
+            for item in self.children:
+                if isinstance(item, discord.ui.Button) and item.custom_id == "join_giveaway":
+                    item.disabled = True
     
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if not hasattr(self, 'message') or self.message is None:
@@ -533,6 +541,22 @@ class GiveawayView(discord.ui.View):
             total_pages=total_pages,
             original_view=self  # Pass the original view
         )
+        
+        @discord.ui.button(label="My Guesses", style=discord.ButtonStyle.secondary, custom_id="my_guesses")
+        async def my_guesses(self, interaction: discord.Interaction, button: discord.ui.Button):
+            user_guesses = self.giveaway.user_guesses.get(interaction.user.id, [])
+        
+            if not user_guesses:
+                return await interaction.response.send_message(
+                    "You haven't made any guesses yet!",
+                    ephemeral=True
+                )
+        
+            guess_list = ', '.join(map(str, user_guesses))
+            await interaction.response.send_message(
+                f"📋 Your guesses: `{guess_list}`",
+                ephemeral=True
+            )
         
         # Only respond if we haven't already
         if not interaction.response.is_done():
