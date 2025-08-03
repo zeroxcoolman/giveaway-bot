@@ -42,6 +42,7 @@ ADMIN_ROLES = ["𝓞𝔀𝓷𝓮𝓻 👑", "Tuff nonchalant aurafarmer sigma pr
 ADMIN_ROLE_IDS = [1342599762993741855, 1385318110747164775, 1343263454114480161]
 MESSAGES_PER_SHECKLE = 10  # Number of messages needed to earn 1 sheckle
 
+giveaway_logs = []
 active_giveaways = {}
 user_message_counts = defaultdict(int)
 user_inventory = defaultdict(lambda: {"growing": [], "grown": []})
