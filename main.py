@@ -498,7 +498,7 @@ class GiveawayView(discord.ui.View):
     async def view_participants(self, interaction: discord.Interaction, button: discord.ui.Button):
         """Show paginated list of participants"""
         participants = list(self.giveaway.participants)
-        total_pages = max(1, (len(participants) + 9) // 10)  # 10 per page
+        total_pages = max(1, (len(participants) + 9) // 10  # 10 per page
         
         if not participants:
             embed = discord.Embed(
@@ -508,6 +508,17 @@ class GiveawayView(discord.ui.View):
             )
             await interaction.response.send_message(embed=embed, ephemeral=True)
             return
+        
+        # Create initial participants embed (page 0)
+        embed = self.create_participants_embed(participants, 0, total_pages)
+        view = ParticipantsView(
+            giveaway=self.giveaway,
+            participants=participants,
+            current_page=0,
+            total_pages=total_pages,
+            original_view=self  # Pass the current GiveawayView instance
+        )
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
         
         # Create initial participants embed (page 0)
         embed = self.create_participants_embed(participants, 0, total_pages)
@@ -579,13 +590,13 @@ def create_giveaway_embed(giveaway: Giveaway) -> discord.Embed:
     return embed
 
 class ParticipantsView(discord.ui.View):
-    def __init__(self, giveaway: Giveaway, participants: list, current_page: int, total_pages: int):
+    def __init__(self, giveaway: Giveaway, participants: list, current_page: int, total_pages: int, original_view: GiveawayView = None):
         super().__init__(timeout=60)
         self.giveaway = giveaway
         self.participants = participants
         self.current_page = current_page
         self.total_pages = total_pages
-        self.original_view = original_view
+        self.original_view = original_view  # Store the original view reference
         
         # Disable navigation buttons when appropriate
         self.prev_button.disabled = current_page == 0
@@ -606,12 +617,12 @@ class ParticipantsView(discord.ui.View):
     @discord.ui.button(label="Back", style=discord.ButtonStyle.blurple)
     async def back_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         """Return to the original giveaway view"""
-        if self.original_view and hasattr(self.original_view, 'message'):
-            # Reuse the original view and message
-            await self.original_view.message.edit(view=self.original_view)
-            await interaction.response.defer()
+        if self.original_view:
+            # Rebuild the original embed
+            embed = create_giveaway_embed(self.giveaway)
+            await interaction.response.edit_message(embed=embed, view=self.original_view)
         else:
-            # Fallback if original view isn't available
+            # Fallback if no original view was provided
             embed = create_giveaway_embed(self.giveaway)
             view = GiveawayView(self.giveaway)
             await interaction.response.edit_message(embed=embed, view=view)
