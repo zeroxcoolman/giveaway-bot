@@ -405,72 +405,6 @@ class TradeView(View):
         except:
             pass
 
-def create_giveaway_embed(giveaway: Giveaway) -> discord.Embed:
-    """Creates an embed for the giveaway with all relevant information"""
-    embed = discord.Embed(
-        title="🎉 NUMBER GUESS GIVEAWAY 🎉",
-        description=f"Hosted by {giveaway.hoster.mention}",
-        color=discord.Color.gold()
-    )
-    
-    # Main prize information
-    embed.add_field(
-        name="🏆 Prize",
-        value=giveaway.prize,
-        inline=False
-    )
-    
-    # Game details
-    embed.add_field(
-        name="🔢 Number Range",
-        value=f"{giveaway.low}-{giveaway.high}",
-        inline=True
-    )
-    
-    embed.add_field(
-        name="🎯 Winners Needed",
-        value=str(giveaway.winners_required),
-        inline=True
-    )
-    
-    # Time information
-    if giveaway.duration_minutes > 0:
-        remaining = max(0, giveaway.end_time - time.time())
-        mins, secs = divmod(int(remaining), 60)
-        embed.add_field(
-            name="⏳ Time Remaining",
-            value=f"{mins}m {secs}s",
-            inline=True
-        )
-    else:
-        embed.add_field(
-            name="⏳ Duration",
-            value="No time limit",
-            inline=True
-        )
-    
-    # Participation stats
-    embed.add_field(
-        name="👥 Participants",
-        value=f"{len(giveaway.participants)} joined",
-        inline=True
-    )
-    
-    embed.add_field(
-        name="🏆 Winners Found",
-        value=f"{len(giveaway.winners)}/{giveaway.winners_required}",
-        inline=True
-    )
-    
-    # Footer with instructions
-    embed.set_footer(
-        text="Click 'Join Giveaway' to participate!",
-        icon_url=giveaway.hoster.display_avatar.url
-    )
-    
-    return embed
-
-
 class GiveawayView(discord.ui.View):
     def __init__(self, giveaway: Giveaway):
         super().__init__(timeout=None)
@@ -535,6 +469,71 @@ class GiveawayView(discord.ui.View):
         embed.set_footer(text=f"Total participants: {len(participants)}")
         
         return embed
+
+def create_giveaway_embed(giveaway: Giveaway) -> discord.Embed:
+    """Creates an embed for the giveaway with all relevant information"""
+    embed = discord.Embed(
+        title="🎉 NUMBER GUESS GIVEAWAY 🎉",
+        description=f"Hosted by {giveaway.hoster.mention}",
+        color=discord.Color.gold()
+    )
+    
+    # Main prize information
+    embed.add_field(
+        name="🏆 Prize",
+        value=giveaway.prize,
+        inline=False
+    )
+    
+    # Game details
+    embed.add_field(
+        name="🔢 Number Range",
+        value=f"{giveaway.low}-{giveaway.high}",
+        inline=True
+    )
+    
+    embed.add_field(
+        name="🎯 Winners Needed",
+        value=str(giveaway.winners_required),
+        inline=True
+    )
+    
+    # Time information
+    if giveaway.duration_minutes > 0:
+        remaining = max(0, giveaway.end_time - time.time())
+        mins, secs = divmod(int(remaining), 60)
+        embed.add_field(
+            name="⏳ Time Remaining",
+            value=f"{mins}m {secs}s",
+            inline=True
+        )
+    else:
+        embed.add_field(
+            name="⏳ Duration",
+            value="No time limit",
+            inline=True
+        )
+    
+    # Participation stats
+    embed.add_field(
+        name="👥 Participants",
+        value=f"{len(giveaway.participants)} joined",
+        inline=True
+    )
+    
+    embed.add_field(
+        name="🏆 Winners Found",
+        value=f"{len(giveaway.winners)}/{giveaway.winners_required}",
+        inline=True
+    )
+    
+    # Footer with instructions
+    embed.set_footer(
+        text="Click 'Join Giveaway' to participate!",
+        icon_url=giveaway.hoster.display_avatar.url
+    )
+    
+    return embed
 
 
 class ParticipantsView(discord.ui.View):
