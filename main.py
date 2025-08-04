@@ -342,7 +342,12 @@ class TradeView(View):
         recipient_seed = next((s for s in recipient_grown if s.name == self.recipient_seed.name and s.mutation == self.recipient_seed.mutation), None)
         
         if not sender_seed or not recipient_seed:
-            trade_offers.pop(self.recipient.id, None)
+            remove_trade_offer(
+                self.sender.id,
+                self.recipient.id,
+                self.sender_seed.name,
+                self.recipient_seed.name
+            )
             await interaction.followup.send("❌ One or both seeds no longer available.", ephemeral=True)
             return
         
@@ -360,8 +365,13 @@ class TradeView(View):
             "time": time.time()
         })
         
-        trade_offers.pop(self.recipient.id, None)
-        
+        remove_trade_offer(
+            self.sender.id,
+            self.recipient.id,
+            self.sender_seed.name,
+            self.recipient_seed.name
+        )
+
         # Update the message
         embed = discord.Embed(
             title="✅ Trade Completed",
@@ -392,7 +402,13 @@ class TradeView(View):
             await interaction.followup.send("❌ This trade isn't for you!", ephemeral=True)
             return
             
-        trade_offers.pop(self.recipient.id, None)
+        remove_trade_offer(
+            self.sender.id,
+            self.recipient.id,
+            self.sender_seed.name,
+            self.recipient_seed.name
+        )
+
             
         embed = discord.Embed(
             title="❌ Trade Declined",
@@ -1491,6 +1507,17 @@ def find_matching_seed(seed_list, desired_input):
         if mut is None or (s.mutation and s.mutation.lower() == mut.lower()):
             return s
     return None
+
+def remove_trade_offer(sender_id, recipient_id, sender_seed_name, recipient_seed_name):
+    """Safely remove a specific trade offer from the recipient's queue"""
+    trade_offers[recipient_id] = [
+        offer for offer in trade_offers[recipient_id]
+        if not (
+            offer["sender_id"] == sender_id and
+            offer["sender_seed_name"] == sender_seed_name and
+            offer["recipient_seed_name"] == recipient_seed_name
+        )
+    ]
 
 @tree.command(name="trade_offer")
 @auto_defer(ephemeral=False)
