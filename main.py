@@ -327,7 +327,13 @@ class TradeView(View):
     @discord.ui.button(label="Accept Trade", style=ButtonStyle.green)
     async def accept(self, interaction: discord.Interaction, button: Button):
         if interaction.user.id != self.recipient.id:
-            await interaction.followup.send("❌ This trade isn't for you!", ephemeral=True)
+            try:
+                await interaction.response.send_message("❌ This trade isn't for you!", ephemeral=True)
+            except discord.InteractionResponded:
+                try:
+                    await interaction.followup.send("❌ This trade isn't for you!", ephemeral=True)
+                except discord.NotFound:
+                    pass  # Webhook expired, ignore
             return
         
         # Perform the trade
@@ -399,7 +405,13 @@ class TradeView(View):
     @discord.ui.button(label="Decline Trade", style=ButtonStyle.red)
     async def decline(self, interaction: discord.Interaction, button: Button):
         if interaction.user.id != self.recipient.id:
-            await interaction.followup.send("❌ This trade isn't for you!", ephemeral=True)
+            try:
+                await interaction.response.send_message("❌ This trade isn't for you!", ephemeral=True)
+            except discord.InteractionResponded:
+                try:
+                    await interaction.followup.send("❌ This trade isn't for you!", ephemeral=True)
+                except discord.NotFound:
+                    pass  # Webhook expired, ignore
             return
             
         remove_trade_offer(
