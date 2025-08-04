@@ -193,7 +193,7 @@ mutations = {
 
 limited_seeds = {}
 
-trade_offers = {}  # user_id -> dict with keys: sender_id, seed_name, timestamp
+trade_offers = defaultdict(list)  # user_id -> dict with keys: sender_id, seed_name, timestamp
 trade_logs = []
 
 class CloseTicketView(discord.ui.View):
@@ -327,7 +327,8 @@ class TradeView(View):
     @discord.ui.button(label="Accept Trade", style=ButtonStyle.green)
     async def accept(self, interaction: discord.Interaction, button: Button):
         if interaction.user.id != self.recipient.id:
-            return await interaction.followup.send("❌ This trade isn't for you!", ephemeral=True)
+            await interaction.followup.send("❌ This trade isn't for you!", ephemeral=True)
+            return
         
         # Perform the trade
         update_growing_seeds(self.sender.id)
@@ -342,7 +343,8 @@ class TradeView(View):
         
         if not sender_seed or not recipient_seed:
             trade_offers.pop(self.recipient.id, None)
-            return await interaction.followup.send("❌ One or both seeds no longer available.", ephemeral=True)
+            await interaction.followup.send("❌ One or both seeds no longer available.", ephemeral=True)
+            return
         
         # Perform swap
         sender_grown.remove(sender_seed)
@@ -387,7 +389,8 @@ class TradeView(View):
     @discord.ui.button(label="Decline Trade", style=ButtonStyle.red)
     async def decline(self, interaction: discord.Interaction, button: Button):
         if interaction.user.id != self.recipient.id:
-            return await interaction.followup.send("❌ This trade isn't for you!", ephemeral=True)
+            await interaction.followup.send("❌ This trade isn't for you!", ephemeral=True)
+            return
             
         trade_offers.pop(self.recipient.id, None)
             
@@ -1490,7 +1493,7 @@ def find_matching_seed(seed_list, desired_input):
     return None
 
 @tree.command(name="trade_offer")
-@auto_defer(ephemeral=True)
+@auto_defer(ephemeral=False)
 @app_commands.describe(user="User to trade with", yourseed="Seed you're offering", theirseed="Seed you want")
 async def trade_offer(interaction: discord.Interaction, user: discord.Member, yourseed: str, theirseed: str):
     update_growing_seeds(interaction.user.id)
@@ -1534,7 +1537,7 @@ async def trade_offer(interaction: discord.Interaction, user: discord.Member, yo
     
     view = TradeView(interaction.user, user, sender_seed_obj, recipient_seed_obj)
     
-    await interaction.followup.send(
+    await interaction.channel.send(
         f"{user.mention}, you received a trade offer from {interaction.user.mention}!",
         embed=embed,
         view=view
@@ -1555,31 +1558,51 @@ async def trade_offer(interaction: discord.Interaction, user: discord.Member, yo
 @tree.command(name="trade_offers")
 @auto_defer(ephemeral=True)
 async def view_trade_offers(interaction: discord.Interaction):
-    offer = trade_offers.get(interaction.user.id)
-    if not offer:
+    offers = trade_offers.get(interaction.user.id, [])
+    if not offers:
         return await interaction.followup.send("📭 You have no pending trade offers.", ephemeral=True)
 
-    sender = await bot.fetch_user(offer["sender_id"])
+    shown = 0
+    for offer in offers:
+        try:
+            sender = await bot.fetch_user(offer["sender_id"])
+            sender_grown = user_inventory[offer["sender_id"]]["grown"]
+            recipient_grown = user_inventory[interaction.user.id]["grown"]
 
-    # Fetch the real objects from inventory so we can use pretty_seed()
-    sender_grown = user_inventory[offer["sender_id"]]["grown"]
-    recipient_grown = user_inventory[interaction.user.id]["grown"]
-    
-    sender_seed = next((s for s in sender_grown if s.name == offer["sender_seed_name"] and s.mutation == offer["sender_seed_mut"]), None)
-    recipient_seed = next((s for s in recipient_grown if s.name == offer["recipient_seed_name"] and s.mutation == offer["recipient_seed_mut"]), None)
-    
-    from_seed = pretty_seed(sender_seed) if sender_seed else offer["sender_seed_name"]
-    to_seed = pretty_seed(recipient_seed) if recipient_seed else offer["recipient_seed_name"]
+            sender_seed = next(
+                (s for s in sender_grown if s.name == offer["sender_seed_name"] and s.mutation == offer["sender_seed_mut"]),
+                None
+            )
+            recipient_seed = next(
+                (s for s in recipient_grown if s.name == offer["recipient_seed_name"] and s.mutation == offer["recipient_seed_mut"]),
+                None
+            )
 
-    msg = (
-        f"🔁 Pending Trade:\n"
-        f"From: {sender.mention}\n"
-        f"They offer: {from_seed}\n"
-        f"They want: {to_seed}\n"
-        f"Check the trade message to accept/decline!"
-    )
+            if not sender_seed or not recipient_seed:
+                continue  # Skip invalid offers
 
-    await interaction.followup.send(msg, ephemeral=True)
+            embed = discord.Embed(
+                title=f"🔁 Trade Offer from {sender.display_name}",
+                description=(
+                    f"**They offer:** {pretty_seed(sender_seed)}\n"
+                    f"**They want:** {pretty_seed(recipient_seed)}\n"
+                    f"Sent <t:{int(offer['timestamp'])}:R>"
+                ),
+                color=discord.Color.blurple()
+            )
+
+            view = TradeView(sender, interaction.user, sender_seed, recipient_seed)
+            await interaction.channel.send(embed=embed, view=view)
+            shown += 1
+
+        except Exception as e:
+            print(f"Error rendering trade offer: {e}")
+            continue
+
+    if shown == 0:
+        await interaction.followup.send("❌ No valid trade offers could be shown.", ephemeral=True)
+    else:
+        await interaction.followup.send(f"📬 Shown {shown} trade offer(s).", ephemeral=True)
 
 @tree.command(name="trade_logs")
 @auto_defer(ephemeral=True)
