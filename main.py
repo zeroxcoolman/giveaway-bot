@@ -1529,9 +1529,6 @@ async def trade_offer(interaction: discord.Interaction, user: discord.Member, yo
     sender_id = interaction.user.id
     recipient_id = user.id
 
-    if recipient_id in trade_offers:
-        return await interaction.followup.send("❌ That user already has a pending trade offer.", ephemeral=True)
-
     sender_seed_obj = find_matching_seed(user_inventory[sender_id]["grown"], yourseed)
     recipient_seed_obj = find_matching_seed(user_inventory[recipient_id]["grown"], theirseed)
 
@@ -1540,17 +1537,15 @@ async def trade_offer(interaction: discord.Interaction, user: discord.Member, yo
     if not recipient_seed_obj:
         return await interaction.followup.send(f"❌ {user.mention} doesn't have that seed or it's still growing.", ephemeral=True)
 
-    # Store the trade offer
-    trade_offers[recipient_id] = {
+    trade_offers[recipient_id].append({
         "sender_id": sender_id,
         "sender_seed_name": sender_seed_obj.name,
         "sender_seed_mut": sender_seed_obj.mutation,
         "recipient_seed_name": recipient_seed_obj.name,
         "recipient_seed_mut": recipient_seed_obj.mutation,
         "timestamp": time.time()
-    }
+    })
 
-    # Create an embed for the trade
     embed = discord.Embed(
         title="🔔 Trade Offer",
         description=(
@@ -1561,9 +1556,9 @@ async def trade_offer(interaction: discord.Interaction, user: discord.Member, yo
         color=discord.Color.blue()
     )
     embed.set_footer(text="This trade offer will expire in 5 minutes")
-    
+
     view = TradeView(interaction.user, user, sender_seed_obj, recipient_seed_obj)
-    
+
     await interaction.channel.send(
         f"{user.mention}, you received a trade offer from {interaction.user.mention}!",
         embed=embed,
@@ -1578,23 +1573,37 @@ async def trade_offer(interaction: discord.Interaction, user: discord.Member, yo
             f"Check {interaction.channel.mention} to respond!"
         )
     except discord.Forbidden:
-        pass  # User has DMs disabled
-
+        pass  # user has DMs disabled
 
 
 @tree.command(name="trade_offers")
 @auto_defer(ephemeral=True)
 async def view_trade_offers(interaction: discord.Interaction):
-    offers = trade_offers.get(interaction.user.id, [])
+    # Normalize bad old data just in case
+    user_id = interaction.user.id
+    if isinstance(trade_offers.get(user_id), dict):
+        trade_offers[user_id] = [trade_offers[user_id]]
+    elif isinstance(trade_offers.get(user_id), str):
+        trade_offers[user_id] = []
+
+    offers = trade_offers.get(user_id, [])
     if not offers:
         return await interaction.followup.send("📭 You have no pending trade offers.", ephemeral=True)
+
+    # Remove expired offers
+    now = time.time()
+    trade_offers[user_id] = [offer for offer in offers if now - offer["timestamp"] <= 300]
+
+    offers = trade_offers[user_id]
+    if not offers:
+        return await interaction.followup.send("📭 All trade offers expired.", ephemeral=True)
 
     shown = 0
     for offer in offers:
         try:
             sender = await bot.fetch_user(offer["sender_id"])
             sender_grown = user_inventory[offer["sender_id"]]["grown"]
-            recipient_grown = user_inventory[interaction.user.id]["grown"]
+            recipient_grown = user_inventory[user_id]["grown"]
 
             sender_seed = next(
                 (s for s in sender_grown if s.name == offer["sender_seed_name"] and s.mutation == offer["sender_seed_mut"]),
@@ -1606,7 +1615,7 @@ async def view_trade_offers(interaction: discord.Interaction):
             )
 
             if not sender_seed or not recipient_seed:
-                continue  # Skip invalid offers
+                continue  # skip invalid trades
 
             embed = discord.Embed(
                 title=f"🔁 Trade Offer from {sender.display_name}",
@@ -1623,7 +1632,7 @@ async def view_trade_offers(interaction: discord.Interaction):
             shown += 1
 
         except Exception as e:
-            print(f"Error rendering trade offer: {e}")
+            print(f"Error showing trade offer: {e}")
             continue
 
     if shown == 0:
