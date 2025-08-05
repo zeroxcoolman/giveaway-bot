@@ -317,20 +317,53 @@ class MiddlemanModal(discord.ui.Modal, title="Apply for Middleman"):
             )
 
 class TradeView(View):
-    def __init__(self, sender, recipient, sender_seed, recipient_seed, original_message=None, viewer=None):
+    def __init__(self, sender, recipient, sender_seed, recipient_seed, original_message=None, viewer=None, trade_messages=None):
         super().__init__(timeout=300)
-        # Remove Cancel button if viewer is not the sender
-        if viewer and viewer.id != sender.id:
-            for item in self.children:
-                if isinstance(item, discord.ui.Button) and item.label == "Cancel Trade":
-                    self.remove_item(item)
         self.sender = sender
         self.recipient = recipient
         self.sender_seed = sender_seed
         self.recipient_seed = recipient_seed
         self.original_message = original_message
         self.viewer = viewer
-    
+        self.trade_messages = trade_messages or []  # List of message IDs for this trade
+        
+        # Remove Cancel button if viewer is not the sender
+        if viewer and viewer.id != sender.id:
+            for item in self.children:
+                if isinstance(item, discord.ui.Button) and item.label == "Cancel Trade":
+                    self.remove_item(item)
+
+    async def update_all_messages(self, interaction, embed):
+        """Update all messages related to this trade"""
+        messages_to_update = []
+        
+        # Add original message if exists
+        if self.original_message:
+            messages_to_update.append(self.original_message)
+            
+        # Add trade offer messages
+        for msg_id in self.trade_messages:
+            try:
+                msg = await interaction.channel.fetch_message(msg_id)
+                messages_to_update.append(msg)
+            except:
+                pass
+                
+        # Add current message
+        messages_to_update.append(interaction.message)
+        
+        # Disable all buttons first
+        for item in self.children:
+            if isinstance(item, discord.ui.Button):
+                item.disabled = True
+        
+        # Update all messages
+        for msg in set(messages_to_update):  # Remove duplicates
+            try:
+                await msg.edit(embed=embed, view=self)
+            except:
+                pass
+
     @discord.ui.button(label="Accept Trade", style=ButtonStyle.green)
     async def accept(self, interaction: discord.Interaction, button: Button):
         if interaction.user.id != self.recipient.id:
@@ -379,7 +412,7 @@ class TradeView(View):
             self.recipient_seed.name
         )
 
-        # Update the message
+        # Update all messages
         embed = discord.Embed(
             title="✅ Trade Completed",
             description=(
@@ -389,16 +422,8 @@ class TradeView(View):
             color=discord.Color.green()
         )
         
-        self.accept.disabled = True
-        self.decline.disabled = True
-        await interaction.response.edit_message(embed=embed, view=self)
+        await self.update_all_messages(interaction, embed)
 
-        if self.original_message:
-            try:
-                await self.original_message.edit(embed=embed, view=self)
-            except discord.NotFound:
-                pass  # Message was deleted or expired
-        
         # Notify both parties
         try:
             await self.sender.send(
@@ -422,23 +447,16 @@ class TradeView(View):
             self.recipient_seed.name
         )
 
-            
+        # Update all messages
         embed = discord.Embed(
             title="❌ Trade Declined",
             description=f"{self.recipient.mention} declined the trade offer from {self.sender.mention}",
             color=discord.Color.red()
         )
             
-        self.accept.disabled = True
-        self.decline.disabled = True
-        await interaction.response.edit_message(embed=embed, view=self)
+        await self.update_all_messages(interaction, embed)
 
-        if self.original_message:
-            try:
-                await self.original_message.edit(embed=embed, view=self)
-            except discord.NotFound:
-                pass  # Message was deleted or expired
-            
+        # Notify sender
         try:
             await self.sender.send(f"❌ {self.recipient.mention} declined your trade offer.")
         except:
@@ -457,26 +475,16 @@ class TradeView(View):
             self.recipient_seed.name
         )
     
+        # Update all messages
         embed = discord.Embed(
             title="🚫 Trade Cancelled",
             description=f"{self.sender.mention} cancelled the trade offer.",
             color=discord.Color.red()
         )
     
-        self.accept.disabled = True
-        self.decline.disabled = True
-        self.cancel.disabled = True
+        await self.update_all_messages(interaction, embed)
     
-        await interaction.response.edit_message(embed=embed, view=self)
-    
-        # Also update original /trade_offer message if it exists
-        if self.original_message:
-            try:
-                await self.original_message.edit(embed=embed, view=self)
-            except discord.NotFound:
-                pass
-    
-        # Optional: notify recipient
+        # Notify recipient
         try:
             await self.recipient.send(f"🚫 {self.sender.mention} cancelled their trade offer.")
         except:
@@ -1604,13 +1612,16 @@ async def trade_offer(interaction: discord.Interaction, user: discord.Member, yo
     if not recipient_seed_obj:
         return await interaction.followup.send(f"❌ {user.mention} doesn't have that seed or it's still growing.", ephemeral=True)
 
+    
     trade_offers[recipient_id].append({
         "sender_id": sender_id,
         "sender_seed_name": sender_seed_obj.name,
         "sender_seed_mut": sender_seed_obj.mutation,
         "recipient_seed_name": recipient_seed_obj.name,
         "recipient_seed_mut": recipient_seed_obj.mutation,
-        "timestamp": time.time()
+        "timestamp": time.time(),
+        "original_message_id": msg.id,  # Store original message ID
+        "trade_messages": []  # Initialize list for trade offer messages
     })
 
     embed = discord.Embed(
@@ -1656,7 +1667,6 @@ async def trade_offer(interaction: discord.Interaction, user: discord.Member, yo
 @tree.command(name="trade_offers")
 @auto_defer(ephemeral=True)
 async def view_trade_offers(interaction: discord.Interaction):
-    
     # Normalize bad old data just in case
     user_id = interaction.user.id
     if isinstance(trade_offers.get(user_id), dict):
@@ -1707,8 +1717,33 @@ async def view_trade_offers(interaction: discord.Interaction):
                 color=discord.Color.blurple()
             )
 
-            view = TradeView(sender, interaction.user, sender_seed, recipient_seed)
-            await interaction.channel.send(embed=embed, view=view)
+            # Get original message if it exists
+            original_message = None
+            if "original_message_id" in offer:
+                try:
+                    original_message = await interaction.channel.fetch_message(offer["original_message_id"])
+                except:
+                    pass
+
+            # Create view with all message references
+            view = TradeView(
+                sender=sender,
+                recipient=interaction.user,
+                sender_seed=sender_seed,
+                recipient_seed=recipient_seed,
+                original_message=original_message,
+                viewer=interaction.user,
+                trade_messages=offer.get("trade_messages", [])
+            )
+            
+            # Send the trade offer message
+            trade_msg = await interaction.channel.send(embed=embed, view=view)
+            
+            # Store this message ID in the trade's messages list
+            if "trade_messages" not in offer:
+                offer["trade_messages"] = []
+            offer["trade_messages"].append(trade_msg.id)
+            
             shown += 1
 
         except Exception as e:
