@@ -2344,6 +2344,70 @@ async def giveaway(
     if duration_minutes > 0:
         giveaway.task = asyncio.create_task(schedule_giveaway_end(giveaway))
 
+@tree.command(name="test", description="Admin testing command for trades")
+@app_commands.describe(
+    user1="First user",
+    user2="Second user",
+    user1seed="Seed for first user",
+    user2seed="Seed for second user",
+    autogrow="Whether to instantly grow the seeds"
+)
+@app_commands.checks.has_any_role(*ADMIN_ROLE_IDS)
+async def test_command(
+    interaction: discord.Interaction,
+    user1: discord.Member,
+    user2: discord.Member,
+    user1seed: str,
+    user2seed: str,
+    autogrow: bool = False
+):
+    """Admin command to test trades by giving seeds to two users"""
+    await interaction.response.defer(ephemeral=True)
+    
+    # Process seed names
+    base1, mut1, _ = normalize_seed_name(user1seed)
+    base2, mut2, _ = normalize_seed_name(user2seed)
+    
+    # Validate seeds
+    valid_seeds = list(seeds.keys()) + list(limited_seeds.keys())
+    if base1 not in valid_seeds:
+        return await interaction.followup.send(f"❌ Invalid seed for user1: {base1}", ephemeral=True)
+    if base2 not in valid_seeds:
+        return await interaction.followup.send(f"❌ Invalid seed for user2: {base2}", ephemeral=True)
+    
+    # Create seed objects
+    grow_time = 0 if autogrow else calculate_grow_time(base1, user1.id)
+    seed1 = GrowingSeed(base1, grow_time, mutation=mut1)
+    
+    grow_time = 0 if autogrow else calculate_grow_time(base2, user2.id)
+    seed2 = GrowingSeed(base2, grow_time, mutation=mut2)
+    
+    # Add to inventories
+    if autogrow:
+        user_inventory[user1.id]["grown"].append(seed1)
+        user_inventory[user2.id]["grown"].append(seed2)
+    else:
+        user_inventory[user1.id]["growing"].append(seed1)
+        user_inventory[user2.id]["growing"].append(seed2)
+    
+    # Send confirmation
+    embed = discord.Embed(
+        title="✅ Test Seeds Distributed",
+        color=discord.Color.green()
+    )
+    embed.add_field(
+        name=f"🌱 {user1.display_name} received",
+        value=f"{pretty_seed(seed1)} ({'grown' if autogrow else 'growing'})",
+        inline=False
+    )
+    embed.add_field(
+        name=f"🌱 {user2.display_name} received",
+        value=f"{pretty_seed(seed2)} ({'grown' if autogrow else 'growing'})",
+        inline=False
+    )
+    
+    await interaction.followup.send(embed=embed, ephemeral=True)
+
 @bot.event
 async def on_message(message):
     if message.author.bot:
