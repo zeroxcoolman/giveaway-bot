@@ -317,13 +317,19 @@ class MiddlemanModal(discord.ui.Modal, title="Apply for Middleman"):
             )
 
 class TradeView(View):
-    def __init__(self, sender, recipient, sender_seed, recipient_seed, original_message=None):
+    def __init__(self, sender, recipient, sender_seed, recipient_seed, original_message=None, viewer=None):
         super().__init__(timeout=300)
+        # Remove Cancel button if viewer is not the sender
+        if viewer and viewer.id != sender.id:
+            for item in self.children:
+                if isinstance(item, discord.ui.Button) and item.label == "Cancel Trade":
+                    self.remove_item(item)
         self.sender = sender
         self.recipient = recipient
         self.sender_seed = sender_seed
         self.recipient_seed = recipient_seed
         self.original_message = original_message
+        self.viewer = viewer
     
     @discord.ui.button(label="Accept Trade", style=ButtonStyle.green)
     async def accept(self, interaction: discord.Interaction, button: Button):
@@ -437,6 +443,45 @@ class TradeView(View):
             await self.sender.send(f"❌ {self.recipient.mention} declined your trade offer.")
         except:
             pass
+
+    @discord.ui.button(label="Cancel Trade", style=discord.ButtonStyle.danger)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.sender.id:
+            await safe_send_ephemeral(interaction, "❌ Only the sender can cancel this trade.")
+            return
+    
+        remove_trade_offer(
+            self.sender.id,
+            self.recipient.id,
+            self.sender_seed.name,
+            self.recipient_seed.name
+        )
+    
+        embed = discord.Embed(
+            title="🚫 Trade Cancelled",
+            description=f"{self.sender.mention} cancelled the trade offer.",
+            color=discord.Color.red()
+        )
+    
+        self.accept.disabled = True
+        self.decline.disabled = True
+        self.cancel.disabled = True
+    
+        await interaction.response.edit_message(embed=embed, view=self)
+    
+        # Also update original /trade_offer message if it exists
+        if self.original_message:
+            try:
+                await self.original_message.edit(embed=embed, view=self)
+            except discord.NotFound:
+                pass
+    
+        # Optional: notify recipient
+        try:
+            await self.recipient.send(f"🚫 {self.sender.mention} cancelled their trade offer.")
+        except:
+            pass
+
 
 class Giveaway:
     def __init__(self, hoster, prize, winners, number_range, target, duration, channel):
@@ -1587,7 +1632,14 @@ async def trade_offer(interaction: discord.Interaction, user: discord.Member, yo
         view=None  # temporarily no view
     )
 
-    view = TradeView(interaction.user, user, sender_seed_obj, recipient_seed_obj, original_message=msg)
+    view = TradeView(
+        interaction.user,
+        user,
+        sender_seed_obj,
+        recipient_seed_obj,
+        original_message=msg,
+        viewer=interaction.user
+    )
     await msg.edit(view=view)
 
     try:
