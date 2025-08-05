@@ -476,15 +476,15 @@ class TradeView(View):
             except:
                 pass
 
-    except Exception as e:
-        print(f"Error in trade accept: {e}")
-        try:
-            if not interaction.response.is_done():
-                await interaction.response.send_message("❌ An error occurred while processing the trade.", ephemeral=True)
-            else:
-                await interaction.followup.send("❌ An error occurred while processing the trade.", ephemeral=True)
-        except:
-            pass
+        except Exception as e:
+            print(f"Error in trade accept: {e}")
+            try:
+                if not interaction.response.is_done():
+                    await interaction.response.send_message("❌ An error occurred while processing the trade.", ephemeral=True)
+                else:
+                    await interaction.followup.send("❌ An error occurred while processing the trade.", ephemeral=True)
+            except:
+                pass
 
     
     @discord.ui.button(label="Decline Trade", style=ButtonStyle.red)
