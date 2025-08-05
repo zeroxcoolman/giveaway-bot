@@ -339,8 +339,13 @@ class TradeView(View):
         
         # Add original message if exists
         if self.original_message:
-            messages_to_update.append(self.original_message)
-            
+            try:
+                # Refresh the message reference
+                self.original_message = await interaction.channel.fetch_message(self.original_message.id)
+                messages_to_update.append(self.original_message)
+            except discord.NotFound:
+                pass
+                
         # Add trade offer messages
         for msg_id in self.trade_messages:
             try:
@@ -370,69 +375,99 @@ class TradeView(View):
             await safe_send_ephemeral(interaction, "❌ This trade isn't for you!")
             return
         
-        # Perform the trade
-        update_growing_seeds(self.sender.id)
-        update_growing_seeds(self.recipient.id)
-        
-        sender_grown = user_inventory[self.sender.id]["grown"]
-        recipient_grown = user_inventory[self.recipient.id]["grown"]
-        
-        # Find exact seeds
-        sender_seed = next((s for s in sender_grown if s.name == self.sender_seed.name and s.mutation == self.sender_seed.mutation), None)
-        recipient_seed = next((s for s in recipient_grown if s.name == self.recipient_seed.name and s.mutation == self.recipient_seed.mutation), None)
-        
-        if not sender_seed or not recipient_seed:
+        try:
+            # Perform the trade
+            update_growing_seeds(self.sender.id)
+            update_growing_seeds(self.recipient.id)
+            
+            sender_grown = user_inventory[self.sender.id]["grown"]
+            recipient_grown = user_inventory[self.recipient.id]["grown"]
+            
+            # Find exact seeds
+            sender_seed = next((s for s in sender_grown if s.name == self.sender_seed.name and s.mutation == self.sender_seed.mutation), None)
+            recipient_seed = next((s for s in recipient_grown if s.name == self.recipient_seed.name and s.mutation == self.recipient_seed.mutation), None)
+            
+            if not sender_seed or not recipient_seed:
+                remove_trade_offer(
+                    self.sender.id,
+                    self.recipient.id,
+                    self.sender_seed.name,
+                    self.recipient_seed.name
+                )
+                return await safe_send_ephemeral(interaction, "❌ One or both seeds no longer available.")
+            
+            # Perform swap
+            sender_grown.remove(sender_seed)
+            recipient_grown.remove(recipient_seed)
+            sender_grown.append(recipient_seed)
+            recipient_grown.append(sender_seed)
+            
+            trade_logs.append({
+                "from": self.sender.id,
+                "to": self.recipient.id,
+                "gave": sender_seed.name,
+                "got": recipient_seed.name,
+                "time": time.time()
+            })
+            
             remove_trade_offer(
                 self.sender.id,
                 self.recipient.id,
                 self.sender_seed.name,
                 self.recipient_seed.name
             )
-            await safe_send_ephemeral(interaction, "❌ One or both seeds no longer available.")
-            return
-        
-        # Perform swap
-        sender_grown.remove(sender_seed)
-        recipient_grown.remove(recipient_seed)
-        sender_grown.append(recipient_seed)
-        recipient_grown.append(sender_seed)
-        
-        trade_logs.append({
-            "from": self.sender.id,
-            "to": self.recipient.id,
-            "gave": sender_seed.name,
-            "got": recipient_seed.name,
-            "time": time.time()
-        })
-        
-        remove_trade_offer(
-            self.sender.id,
-            self.recipient.id,
-            self.sender_seed.name,
-            self.recipient_seed.name
-        )
 
-        # Update all messages
-        embed = discord.Embed(
-            title="✅ Trade Completed",
-            description=(
-                f"{self.sender.mention} gave {pretty_seed(sender_seed)}\n"
-                f"{self.recipient.mention} gave {pretty_seed(recipient_seed)}"
-            ),
-            color=discord.Color.green()
-        )
-        
-        await self.update_all_messages(interaction, embed)
-
-        # Notify both parties
-        try:
-            await self.sender.send(
-                f"✅ Your trade with {self.recipient.mention} was accepted!\n"
-                f"You received: {pretty_seed(recipient_seed)}\n"
-                f"You gave: {pretty_seed(sender_seed)}"
+            # Create success embed
+            embed = discord.Embed(
+                title="✅ Trade Completed",
+                description=(
+                    f"{self.sender.mention} gave {pretty_seed(sender_seed)}\n"
+                    f"{self.recipient.mention} gave {pretty_seed(recipient_seed)}"
+                ),
+                color=discord.Color.green()
             )
-        except:
-            pass
+            
+            # Disable all buttons
+            for item in self.children:
+                if isinstance(item, discord.ui.Button):
+                    item.disabled = True
+            
+            # Try to update all messages
+            try:
+                await self.update_all_messages(interaction, embed)
+            except Exception as e:
+                print(f"Error updating trade messages: {e}")
+                # If updating fails, just edit the current message
+                try:
+                    await interaction.response.edit_message(embed=embed, view=self)
+                except:
+                    pass
+
+            # Notify both parties
+            try:
+                await self.sender.send(
+                    f"✅ Your trade with {self.recipient.mention} was accepted!\n"
+                    f"You received: {pretty_seed(recipient_seed)}\n"
+                    f"You gave: {pretty_seed(sender_seed)}"
+                )
+            except:
+                pass
+
+            try:
+                await self.recipient.send(
+                    f"✅ You accepted the trade with {self.sender.mention}!\n"
+                    f"You received: {pretty_seed(sender_seed)}\n"
+                    f"You gave: {pretty_seed(recipient_seed)}"
+                )
+            except:
+                pass
+
+        except Exception as e:
+            print(f"Error in trade accept: {e}")
+            try:
+                await interaction.response.send_message("❌ An error occurred while processing the trade.", ephemeral=True)
+            except:
+                pass
 
     @discord.ui.button(label="Decline Trade", style=ButtonStyle.red)
     async def decline(self, interaction: discord.Interaction, button: Button):
