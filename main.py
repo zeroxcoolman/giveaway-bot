@@ -1612,18 +1612,7 @@ async def trade_offer(interaction: discord.Interaction, user: discord.Member, yo
     if not recipient_seed_obj:
         return await interaction.followup.send(f"❌ {user.mention} doesn't have that seed or it's still growing.", ephemeral=True)
 
-    
-    trade_offers[recipient_id].append({
-        "sender_id": sender_id,
-        "sender_seed_name": sender_seed_obj.name,
-        "sender_seed_mut": sender_seed_obj.mutation,
-        "recipient_seed_name": recipient_seed_obj.name,
-        "recipient_seed_mut": recipient_seed_obj.mutation,
-        "timestamp": time.time(),
-        "original_message_id": msg.id,  # Store original message ID
-        "trade_messages": []  # Initialize list for trade offer messages
-    })
-
+    # Create the embed first
     embed = discord.Embed(
         title="🔔 Trade Offer",
         description=(
@@ -1635,23 +1624,30 @@ async def trade_offer(interaction: discord.Interaction, user: discord.Member, yo
     )
     embed.set_footer(text="This trade offer will expire in 5 minutes")
 
+    # Create the view
     view = TradeView(interaction.user, user, sender_seed_obj, recipient_seed_obj)
 
+    # Send the message
     msg = await interaction.channel.send(
         f"{user.mention}, you received a trade offer from {interaction.user.mention}!",
         embed=embed,
-        view=None  # temporarily no view
+        view=view
     )
 
-    view = TradeView(
-        interaction.user,
-        user,
-        sender_seed_obj,
-        recipient_seed_obj,
-        original_message=msg,
-        viewer=interaction.user
-    )
-    await msg.edit(view=view)
+    # Now update the view with the message reference
+    view.original_message = msg
+
+    # Store the trade offer with the message ID
+    trade_offers[recipient_id].append({
+        "sender_id": sender_id,
+        "sender_seed_name": sender_seed_obj.name,
+        "sender_seed_mut": sender_seed_obj.mutation,
+        "recipient_seed_name": recipient_seed_obj.name,
+        "recipient_seed_mut": recipient_seed_obj.mutation,
+        "timestamp": time.time(),
+        "original_message_id": msg.id,
+        "trade_messages": [msg.id]  # Initialize with this message
+    })
 
     try:
         await user.send(
