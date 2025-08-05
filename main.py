@@ -317,23 +317,18 @@ class MiddlemanModal(discord.ui.Modal, title="Apply for Middleman"):
             )
 
 class TradeView(View):
-    def __init__(self, sender, recipient, sender_seed, recipient_seed):
-        super().__init__(timeout=300)  # 5 minute timeout
+    def __init__(self, sender, recipient, sender_seed, recipient_seed, original_message=None):
+        super().__init__(timeout=300)
         self.sender = sender
         self.recipient = recipient
         self.sender_seed = sender_seed
         self.recipient_seed = recipient_seed
+        self.original_message = original_message
     
     @discord.ui.button(label="Accept Trade", style=ButtonStyle.green)
     async def accept(self, interaction: discord.Interaction, button: Button):
         if interaction.user.id != self.recipient.id:
-            try:
-                await interaction.response.send_message("❌ This trade isn't for you!", ephemeral=True)
-            except discord.InteractionResponded:
-                try:
-                    await interaction.followup.send("❌ This trade isn't for you!", ephemeral=True)
-                except discord.NotFound:
-                    pass  # Webhook expired, ignore
+            await safe_send_ephemeral(interaction, "❌ This trade isn't for you!")
             return
         
         # Perform the trade
@@ -354,7 +349,7 @@ class TradeView(View):
                 self.sender_seed.name,
                 self.recipient_seed.name
             )
-            await interaction.followup.send("❌ One or both seeds no longer available.", ephemeral=True)
+            await safe_send_ephemeral(interaction, "❌ One or both seeds no longer available.")
             return
         
         # Perform swap
@@ -391,6 +386,12 @@ class TradeView(View):
         self.accept.disabled = True
         self.decline.disabled = True
         await interaction.response.edit_message(embed=embed, view=self)
+
+        if self.original_message:
+            try:
+                await self.original_message.edit(embed=embed, view=self)
+            except discord.NotFound:
+                pass  # Message was deleted or expired
         
         # Notify both parties
         try:
@@ -405,13 +406,7 @@ class TradeView(View):
     @discord.ui.button(label="Decline Trade", style=ButtonStyle.red)
     async def decline(self, interaction: discord.Interaction, button: Button):
         if interaction.user.id != self.recipient.id:
-            try:
-                await interaction.response.send_message("❌ This trade isn't for you!", ephemeral=True)
-            except discord.InteractionResponded:
-                try:
-                    await interaction.followup.send("❌ This trade isn't for you!", ephemeral=True)
-                except discord.NotFound:
-                    pass  # Webhook expired, ignore
+            await safe_send_ephemeral(interaction, "❌ This trade isn't for you!")
             return
             
         remove_trade_offer(
@@ -431,6 +426,12 @@ class TradeView(View):
         self.accept.disabled = True
         self.decline.disabled = True
         await interaction.response.edit_message(embed=embed, view=self)
+
+        if self.original_message:
+            try:
+                await self.original_message.edit(embed=embed, view=self)
+            except discord.NotFound:
+                pass  # Message was deleted or expired
             
         try:
             await self.sender.send(f"❌ {self.recipient.mention} declined your trade offer.")
@@ -1531,6 +1532,15 @@ def remove_trade_offer(sender_id, recipient_id, sender_seed_name, recipient_seed
         )
     ]
 
+async def safe_send_ephemeral(interaction, message):
+    try:
+        if not interaction.response.is_done():
+            await interaction.response.send_message(message, ephemeral=True)
+        else:
+            await interaction.followup.send(message, ephemeral=True)
+    except discord.NotFound:
+        pass
+
 @tree.command(name="trade_offer")
 @auto_defer(ephemeral=False)
 @app_commands.describe(user="User to trade with", yourseed="Seed you're offering", theirseed="Seed you want")
@@ -1571,11 +1581,14 @@ async def trade_offer(interaction: discord.Interaction, user: discord.Member, yo
 
     view = TradeView(interaction.user, user, sender_seed_obj, recipient_seed_obj)
 
-    await interaction.channel.send(
+    msg = await interaction.channel.send(
         f"{user.mention}, you received a trade offer from {interaction.user.mention}!",
         embed=embed,
-        view=view
+        view=None  # temporarily no view
     )
+
+    view = TradeView(interaction.user, user, sender_seed_obj, recipient_seed_obj, original_message=msg)
+    await msg.edit(view=view)
 
     try:
         await user.send(
@@ -1591,12 +1604,15 @@ async def trade_offer(interaction: discord.Interaction, user: discord.Member, yo
 @tree.command(name="trade_offers")
 @auto_defer(ephemeral=True)
 async def view_trade_offers(interaction: discord.Interaction):
+    
     # Normalize bad old data just in case
     user_id = interaction.user.id
     if isinstance(trade_offers.get(user_id), dict):
         trade_offers[user_id] = [trade_offers[user_id]]
     elif isinstance(trade_offers.get(user_id), str):
         trade_offers[user_id] = []
+    elif isinstance(trade_offers.get(user_id), list):
+        trade_offers[user_id] = [x for x in trade_offers[user_id] if isinstance(x, dict)]
 
     offers = trade_offers.get(user_id, [])
     if not offers:
