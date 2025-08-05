@@ -353,21 +353,48 @@ class TradeView(View):
                 messages_to_update.append(msg)
             except:
                 pass
-                
-        # Add current message
-        messages_to_update.append(interaction.message)
         
-        # Disable all buttons first
+        # Disable all buttons in the current view
         for item in self.children:
             if isinstance(item, discord.ui.Button):
                 item.disabled = True
         
-        # Update all messages
-        for msg in set(messages_to_update):  # Remove duplicates
+        # Handle the interaction response first
+        try:
+            if not interaction.response.is_done():
+                await interaction.response.edit_message(embed=embed, view=self)
+            else:
+                await interaction.edit_original_response(embed=embed, view=self)
+        except Exception as e:
+            print(f"Error responding to interaction: {e}")
             try:
-                await msg.edit(embed=embed, view=self)
+                await interaction.followup.send("✅ Trade completed successfully!", ephemeral=True)
             except:
                 pass
+        
+        # Update other messages (excluding the current interaction message)
+        current_msg_id = interaction.message.id if hasattr(interaction, 'message') else None
+        
+        for msg in messages_to_update:
+            if msg.id != current_msg_id:  # Don't update the message we just responded to
+                try:
+                    # Create a new disabled view for each message
+                    disabled_view = TradeView(
+                        self.sender, 
+                        self.recipient, 
+                        self.sender_seed, 
+                        self.recipient_seed,
+                        viewer=self.viewer
+                    )
+                    # Disable all buttons in the new view
+                    for item in disabled_view.children:
+                        if isinstance(item, discord.ui.Button):
+                            item.disabled = True
+                    
+                    await msg.edit(embed=embed, view=disabled_view)
+                except Exception as e:
+                    print(f"Error updating message {msg.id}: {e}")
+                    continue
 
     @discord.ui.button(label="Accept Trade", style=ButtonStyle.green)
     async def accept(self, interaction: discord.Interaction, button: Button):
@@ -416,7 +443,7 @@ class TradeView(View):
                 self.sender_seed.name,
                 self.recipient_seed.name
             )
-
+    
             # Create success embed
             embed = discord.Embed(
                 title="✅ Trade Completed",
@@ -427,23 +454,10 @@ class TradeView(View):
                 color=discord.Color.green()
             )
             
-            # Disable all buttons
-            for item in self.children:
-                if isinstance(item, discord.ui.Button):
-                    item.disabled = True
-            
-            # Try to update all messages
-            try:
-                await self.update_all_messages(interaction, embed)
-            except Exception as e:
-                print(f"Error updating trade messages: {e}")
-                # If updating fails, just edit the current message
-                try:
-                    await interaction.response.edit_message(embed=embed, view=self)
-                except:
-                    pass
-
-            # Notify both parties
+            # Update all messages
+            await self.update_all_messages(interaction, embed)
+    
+            # Notify both parties via DM
             try:
                 await self.sender.send(
                     f"✅ Your trade with {self.recipient.mention} was accepted!\n"
@@ -452,7 +466,7 @@ class TradeView(View):
                 )
             except:
                 pass
-
+    
             try:
                 await self.recipient.send(
                     f"✅ You accepted the trade with {self.sender.mention}!\n"
@@ -462,13 +476,17 @@ class TradeView(View):
             except:
                 pass
 
-        except Exception as e:
-            print(f"Error in trade accept: {e}")
-            try:
+    except Exception as e:
+        print(f"Error in trade accept: {e}")
+        try:
+            if not interaction.response.is_done():
                 await interaction.response.send_message("❌ An error occurred while processing the trade.", ephemeral=True)
-            except:
-                pass
+            else:
+                await interaction.followup.send("❌ An error occurred while processing the trade.", ephemeral=True)
+        except:
+            pass
 
+    
     @discord.ui.button(label="Decline Trade", style=ButtonStyle.red)
     async def decline(self, interaction: discord.Interaction, button: Button):
         if interaction.user.id != self.recipient.id:
@@ -481,7 +499,7 @@ class TradeView(View):
             self.sender_seed.name,
             self.recipient_seed.name
         )
-
+    
         # Update all messages
         embed = discord.Embed(
             title="❌ Trade Declined",
@@ -490,7 +508,7 @@ class TradeView(View):
         )
             
         await self.update_all_messages(interaction, embed)
-
+    
         # Notify sender
         try:
             await self.sender.send(f"❌ {self.recipient.mention} declined your trade offer.")
@@ -524,7 +542,6 @@ class TradeView(View):
             await self.recipient.send(f"🚫 {self.sender.mention} cancelled their trade offer.")
         except:
             pass
-
 
 class Giveaway:
     def __init__(self, hoster, prize, winners, number_range, target, duration, channel):
