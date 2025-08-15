@@ -1054,7 +1054,7 @@ class ShovelConfirmView(discord.ui.View):
     @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.stop()
-        await interaction.followup.send("🚫 Removal cancelled.", ephemeral=True)
+        await interaction.response.send_message("🚫 Removal cancelled.", ephemeral=True)
 
 class GrowingSeed:
     def __init__(self, name, grow_duration, mutation=None, limited=False, allowed_mutations=None):
