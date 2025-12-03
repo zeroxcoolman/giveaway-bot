@@ -11,6 +11,18 @@ from typing import Optional
 from discord.ui import Select, Button, View
 from discord import ButtonStyle
 import functools
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.chrome.options import Options
+from selenium.common.exceptions import TimeoutException, NoSuchElementException
+from reportlab.lib.pagesizes import letter
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image as RLImage
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import inch
+from reportlab.lib.enums import TA_LEFT
+
 
 def auto_defer(ephemeral=True):
     def decorator(func):
@@ -195,6 +207,436 @@ limited_seeds = {}
 
 trade_offers = defaultdict(list)  # user_id -> dict with keys: sender_id, seed_name, timestamp
 trade_logs = []
+
+class SparxAutocompleter:
+    def __init__(self):
+        self.driver = None
+        self.homework_data = []
+        
+    def setup_driver(self):
+        """Setup headless Chrome driver for Railway deployment"""
+        chrome_options = Options()
+        chrome_options.add_argument("--headless")
+        chrome_options.add_argument("--no-sandbox")
+        chrome_options.add_argument("--disable-dev-shm-usage")
+        chrome_options.add_argument("--disable-gpu")
+        chrome_options.add_argument("--window-size=1920,1080")
+        chrome_options.add_argument("--disable-blink-features=AutomationControlled")
+        chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+        chrome_options.add_experimental_option('useAutomationExtension', False)
+        
+        self.driver = webdriver.Chrome(options=chrome_options)
+        self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+        
+    def login(self, username, password):
+        """Login to Sparx Maths"""
+        try:
+            self.driver.get("https://www.sparxmaths.com/")
+            
+            # Wait for and click login button
+            login_btn = WebDriverWait(self.driver, 10).until(
+                EC.element_to_be_clickable((By.XPATH, "//a[contains(text(), 'Login')]"))
+            )
+            login_btn.click()
+            
+            # Enter username
+            username_field = WebDriverWait(self.driver, 10).until(
+                EC.presence_of_element_located((By.ID, "username"))
+            )
+            username_field.send_keys(username)
+            
+            # Enter password
+            password_field = self.driver.find_element(By.ID, "password")
+            password_field.send_keys(password)
+            
+            # Click submit
+            submit_btn = self.driver.find_element(By.XPATH, "//button[@type='submit']")
+            submit_btn.click()
+            
+            # Wait for dashboard to load
+            time.sleep(3)
+            
+            return True
+        except Exception as e:
+            print(f"Login error: {e}")
+            return False
+    
+    def find_new_homework(self):
+        """Scan for new homework assignments"""
+        try:
+            # Look for homework items marked as "Not started"
+            homework_elements = self.driver.find_elements(
+                By.XPATH, 
+                "//div[contains(@class, 'homework') or contains(@class, 'task')]"
+            )
+            
+            new_homework = []
+            for hw in homework_elements:
+                try:
+                    status = hw.find_element(By.XPATH, ".//span[contains(text(), 'Not started')]")
+                    if status:
+                        title = hw.find_element(By.XPATH, ".//h3 | .//h4 | .//div[contains(@class, 'title')]").text
+                        new_homework.append({
+                            'title': title,
+                            'element': hw
+                        })
+                except NoSuchElementException:
+                    continue
+            
+            return new_homework
+        except Exception as e:
+            print(f"Error finding homework: {e}")
+            return []
+    
+    def extract_and_input_answers(self, homework_element):
+        """Extract questions, get answers, and input them into Sparx"""
+        questions_data = []
+        
+        try:
+            # Click on homework to open
+            homework_element.click()
+            time.sleep(2)
+            
+            # Find all question elements
+            questions = self.driver.find_elements(
+                By.XPATH,
+                "//div[contains(@class, 'question') or contains(@class, 'task-item')]"
+            )
+            
+            for i, question in enumerate(questions, 1):
+                try:
+                    # Scroll to question
+                    self.driver.execute_script("arguments[0].scrollIntoView(true);", question)
+                    time.sleep(1)
+                    
+                    # Take screenshot of question
+                    screenshot = question.screenshot_as_png
+                    
+                    # Try to extract text content
+                    question_text = ""
+                    try:
+                        question_text = question.find_element(
+                            By.XPATH, 
+                            ".//div[contains(@class, 'question-text')] | .//p"
+                        ).text
+                    except NoSuchElementException:
+                        question_text = "Question image captured"
+                    
+                    # Try to find and click "Show answer" button
+                    answer_text = ""
+                    screenshot_with_answer = None
+                    
+                    try:
+                        # Click "Show answer" or "Hint" button if available
+                        show_answer = question.find_element(
+                            By.XPATH,
+                            ".//button[contains(text(), 'Show') or contains(text(), 'Hint') or contains(text(), 'Answer')]"
+                        )
+                        show_answer.click()
+                        time.sleep(1)
+                        
+                        # Get the answer
+                        answer = question.find_element(
+                            By.XPATH,
+                            ".//div[contains(@class, 'answer') or contains(@class, 'solution')]"
+                        )
+                        answer_text = answer.text
+                        
+                        # Screenshot with answer visible
+                        screenshot_with_answer = question.screenshot_as_png
+                        
+                        # NOW INPUT THE ANSWER
+                        # Find input fields
+                        input_fields = question.find_elements(
+                            By.XPATH,
+                            ".//input[@type='text'] | .//input[@type='number'] | .//textarea"
+                        )
+                        
+                        if input_fields:
+                            # If answer_text contains numbers, try to input them
+                            # Split answer by common delimiters
+                            answer_parts = answer_text.replace(',', ' ').split()
+                            
+                            for idx, field in enumerate(input_fields):
+                                if idx < len(answer_parts):
+                                    field.clear()
+                                    field.send_keys(answer_parts[idx])
+                                    time.sleep(0.5)
+                        
+                        # Look for multiple choice options
+                        mc_options = question.find_elements(
+                            By.XPATH,
+                            ".//button[contains(@class, 'option')] | .//div[contains(@class, 'choice')]"
+                        )
+                        
+                        if mc_options:
+                            # Try to match answer text with an option
+                            for option in mc_options:
+                                if answer_text.lower() in option.text.lower():
+                                    option.click()
+                                    time.sleep(0.5)
+                                    break
+                        
+                        # Click "Submit" or "Check" button
+                        try:
+                            submit_btn = question.find_element(
+                                By.XPATH,
+                                ".//button[contains(text(), 'Submit') or contains(text(), 'Check') or contains(text(), 'Next')]"
+                            )
+                            submit_btn.click()
+                            time.sleep(1)
+                        except NoSuchElementException:
+                            pass
+                        
+                    except NoSuchElementException:
+                        answer_text = "Answer not available - could not auto-complete this question"
+                    
+                    questions_data.append({
+                        'number': i,
+                        'question_text': question_text,
+                        'answer_text': answer_text,
+                        'screenshot': screenshot,
+                        'screenshot_with_answer': screenshot_with_answer
+                    })
+                    
+                except Exception as e:
+                    print(f"Error extracting question {i}: {e}")
+                    continue
+            
+            return questions_data
+            
+        except Exception as e:
+            print(f"Error extracting questions: {e}")
+            return []
+    
+    def create_pdf(self, homework_title, questions_data):
+        """Create PDF with questions and answers"""
+        pdf_buffer = BytesIO()
+        doc = SimpleDocTemplate(pdf_buffer, pagesize=letter)
+        story = []
+        styles = getSampleStyleSheet()
+        
+        # Custom styles
+        title_style = ParagraphStyle(
+            'CustomTitle',
+            parent=styles['Heading1'],
+            fontSize=24,
+            textColor='#1a73e8',
+            spaceAfter=30,
+            alignment=TA_LEFT
+        )
+        
+        question_style = ParagraphStyle(
+            'Question',
+            parent=styles['Heading2'],
+            fontSize=14,
+            textColor='#202124',
+            spaceAfter=12
+        )
+        
+        # Add title
+        story.append(Paragraph(homework_title, title_style))
+        story.append(Paragraph(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}", styles['Normal']))
+        story.append(Spacer(1, 0.5*inch))
+        
+        # Add each question
+        for q in questions_data:
+            # Question number and text
+            story.append(Paragraph(f"Question {q['number']}", question_style))
+            story.append(Paragraph(q['question_text'], styles['Normal']))
+            story.append(Spacer(1, 0.2*inch))
+            
+            # Question screenshot
+            if q['screenshot']:
+                img = Image.open(BytesIO(q['screenshot']))
+                img_width = 6*inch
+                img_height = (img.height / img.width) * img_width
+                
+                # Save temp image
+                temp_img_path = f"temp_q{q['number']}.png"
+                img.save(temp_img_path)
+                
+                story.append(RLImage(temp_img_path, width=img_width, height=img_height))
+                story.append(Spacer(1, 0.2*inch))
+            
+            # Answer
+            story.append(Paragraph("<b>Answer:</b>", styles['Normal']))
+            story.append(Paragraph(q['answer_text'], styles['Normal']))
+            story.append(Spacer(1, 0.2*inch))
+            
+            # Answer screenshot if available
+            if q['screenshot_with_answer']:
+                img_ans = Image.open(BytesIO(q['screenshot_with_answer']))
+                img_width = 6*inch
+                img_height = (img_ans.height / img_ans.width) * img_width
+                
+                temp_img_ans_path = f"temp_a{q['number']}.png"
+                img_ans.save(temp_img_ans_path)
+                
+                story.append(RLImage(temp_img_ans_path, width=img_width, height=img_height))
+            
+            story.append(Spacer(1, 0.5*inch))
+        
+        # Build PDF
+        doc.build(story)
+        
+        # Clean up temp images
+        for q in questions_data:
+            try:
+                os.remove(f"temp_q{q['number']}.png")
+                if q['screenshot_with_answer']:
+                    os.remove(f"temp_a{q['number']}.png")
+            except:
+                pass
+        
+        pdf_buffer.seek(0)
+        return pdf_buffer
+    
+    def cleanup(self):
+        """Close browser"""
+        if self.driver:
+            self.driver.quit()
+
+
+class SparxCog(commands.Cog):
+    def __init__(self, bot):
+        self.bot = bot
+        self.active_sessions = {}
+    
+    @commands.command(name='sparx')
+    async def sparx_autocomplete(self, ctx):
+        """Start Sparx Maths autocompleter (DM only)"""
+        # Check if in DM
+        if not isinstance(ctx.channel, discord.DMChannel):
+            await ctx.send("❌ This command only works in DMs for privacy!")
+            return
+        
+        await ctx.send("🔐 **Sparx Maths Autocompleter**\n\nPlease enter your Sparx Maths username:")
+        
+        def check(m):
+            return m.author == ctx.author and isinstance(m.channel, discord.DMChannel)
+        
+        try:
+            # Get username
+            username_msg = await self.bot.wait_for('message', timeout=120.0, check=check)
+            username = username_msg.content
+            
+            await ctx.send("🔑 Now enter your password:")
+            
+            # Get password
+            password_msg = await self.bot.wait_for('message', timeout=120.0, check=check)
+            password = password_msg.content
+            
+            # Delete password message for security
+            try:
+                await password_msg.delete()
+            except:
+                pass
+            
+            # Ask for delay time
+            await ctx.send("⏱️ How many minutes should I wait before processing? (Enter a number, e.g., 5 for 5 minutes, or 0 for immediate)")
+            
+            delay_msg = await self.bot.wait_for('message', timeout=120.0, check=check)
+            
+            try:
+                delay_minutes = float(delay_msg.content)
+                if delay_minutes < 0:
+                    await ctx.send("❌ Invalid time! Using immediate processing.")
+                    delay_minutes = 0
+                elif delay_minutes > 60:
+                    await ctx.send("⚠️ Maximum 60 minutes allowed. Setting to 60 minutes.")
+                    delay_minutes = 60
+            except ValueError:
+                await ctx.send("❌ Invalid number! Using immediate processing.")
+                delay_minutes = 0
+            
+            # Delete password message for security
+            try:
+                await password_msg.delete()
+            except:
+                pass
+            
+            await ctx.send("⏳ Logging in to Sparx Maths...")
+            
+            # Initialize autocompleter
+            autocompleter = SparxAutocompleter()
+            
+            # Run browser automation in executor to not block
+            loop = asyncio.get_event_loop()
+            
+            await loop.run_in_executor(None, autocompleter.setup_driver)
+            
+            # Login
+            login_success = await loop.run_in_executor(
+                None, 
+                autocompleter.login, 
+                username, 
+                password
+            )
+            
+            if not login_success:
+                await ctx.send("❌ Login failed! Please check your credentials.")
+                autocompleter.cleanup()
+                return
+            
+            await ctx.send("✅ Logged in successfully! Scanning for new homework...")
+            
+            # Find new homework
+            new_homework = await loop.run_in_executor(
+                None,
+                autocompleter.find_new_homework
+            )
+            
+            if not new_homework:
+                await ctx.send("📚 No new homework found! All caught up.")
+                autocompleter.cleanup()
+                return
+            
+            await ctx.send(f"📝 Found {len(new_homework)} new homework assignment(s)!\n\nProcessing questions...")
+            
+            # Process each homework
+            for hw in new_homework:
+                await ctx.send(f"📖 Processing: **{hw['title']}**")
+                
+                # Extract questions AND input answers
+                questions = await loop.run_in_executor(
+                    None,
+                    autocompleter.extract_and_input_answers,
+                    hw['element']
+                )
+                
+                if not questions:
+                    await ctx.send(f"⚠️ Could not extract questions from {hw['title']}")
+                    continue
+                
+                await ctx.send(f"✨ Found and completed {len(questions)} questions! Creating PDF for your records...")
+                
+                # Create PDF
+                pdf_buffer = await loop.run_in_executor(
+                    None,
+                    autocompleter.create_pdf,
+                    hw['title'],
+                    questions
+                )
+                
+                # Send PDF
+                filename = f"{hw['title'].replace(' ', '_')}_{datetime.now().strftime('%Y%m%d')}.pdf"
+                await ctx.send(
+                    f"✅ **{hw['title']}** completed and submitted!",
+                    file=discord.File(pdf_buffer, filename=filename)
+                )
+            
+            await ctx.send("🎉 All homework completed and submitted! PDF records sent for your reference.")
+            
+            # Cleanup
+            autocompleter.cleanup()
+            
+        except asyncio.TimeoutError:
+            await ctx.send("⏱️ Timed out waiting for response. Please try again.")
+        except Exception as e:
+            await ctx.send(f"❌ An error occurred: {str(e)}")
+            print(f"Sparx error: {e}")
+
 
 class CloseTicketView(discord.ui.View):
     def __init__(self, bot):
