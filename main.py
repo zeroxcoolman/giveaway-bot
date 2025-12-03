@@ -1588,6 +1588,8 @@ async def on_ready():
         if hasattr(giveaway, 'view') and giveaway.view:
             bot.add_view(giveaway.view, message_id=giveaway.view.message.id)
     bot.add_view(CloseTicketView(bot))
+    await bot.add_cog(SparxCog(bot))
+    print("✅ Sparx Autocompleter loaded!")
     refresh_stock.start()
 
     rotate_seasons.start()
