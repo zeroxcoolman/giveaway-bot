@@ -217,20 +217,51 @@ class SparxAutocompleter:
         self.driver = None
         self.homework_data = []
         
+    class SparxAutocompleter:
+    def __init__(self):
+        self.driver = None
+        self.homework_data = []
+        
     def setup_driver(self):
         """Setup headless Chrome driver for Railway deployment"""
         chrome_options = Options()
-        chrome_options.add_argument("--headless")
+        
+        # Essential Railway/Docker options
+        chrome_options.add_argument("--headless=new")  # Use new headless mode
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
         chrome_options.add_argument("--disable-gpu")
+        chrome_options.add_argument("--disable-software-rasterizer")
+        chrome_options.add_argument("--disable-extensions")
         chrome_options.add_argument("--window-size=1920,1080")
         chrome_options.add_argument("--disable-blink-features=AutomationControlled")
+        chrome_options.add_argument("--user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+        
+        # Disable unnecessary features for performance
+        chrome_options.add_argument("--disable-background-timer-throttling")
+        chrome_options.add_argument("--disable-backgrounding-occluded-windows")
+        chrome_options.add_argument("--disable-renderer-backgrounding")
+        
         chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
         chrome_options.add_experimental_option('useAutomationExtension', False)
         
-        self.driver = webdriver.Chrome(options=chrome_options)
-        self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+        # Set binary location for Railway (if chrome is in a custom location)
+        chrome_options.binary_location = "/usr/bin/chromium-browser"  # or "/usr/bin/google-chrome"
+        
+        try:
+            # Try to use Chrome with specific path
+            from selenium.webdriver.chrome.service import Service
+            
+            # ChromeDriver should auto-detect or use system path
+            service = Service()
+            self.driver = webdriver.Chrome(service=service, options=chrome_options)
+            
+            self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+            print("✅ Chrome driver initialized successfully")
+            
+        except Exception as e:
+            print(f"❌ Failed to initialize Chrome: {e}")
+            raise
         
     def login(self, username, password):
         """Login to Sparx Maths"""
@@ -265,6 +296,39 @@ class SparxAutocompleter:
             print(f"Login error: {e}")
             return False
     
+    def login(self, username, password):
+        """Login to Sparx Maths"""
+        try:
+            self.driver.get("https://www.sparxmaths.com/")
+            
+            # Wait for and click login button
+            login_btn = WebDriverWait(self.driver, 10).until(
+                EC.element_to_be_clickable((By.XPATH, "//a[contains(text(), 'Login')]"))
+            )
+            login_btn.click()
+            
+            # Enter username
+            username_field = WebDriverWait(self.driver, 10).until(
+                EC.presence_of_element_located((By.ID, "username"))
+            )
+            username_field.send_keys(username)
+            
+            # Enter password
+            password_field = self.driver.find_element(By.ID, "password")
+            password_field.send_keys(password)
+            
+            # Click submit
+            submit_btn = self.driver.find_element(By.XPATH, "//button[@type='submit']")
+            submit_btn.click()
+            
+            # Wait for dashboard to load
+            time.sleep(3)
+            
+            return True
+        except Exception as e:
+            print(f"Login error: {e}")
+            return False
+
     def find_new_homework(self):
         """Scan for new homework assignments"""
         try:
