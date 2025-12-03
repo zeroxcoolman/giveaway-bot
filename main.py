@@ -22,6 +22,10 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image as RL
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
 from reportlab.lib.enums import TA_LEFT
+from io import BytesIO
+from datetime import datetime
+from PIL import Image
+
 
 
 def auto_defer(ephemeral=True):
