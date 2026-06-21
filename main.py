@@ -1856,4 +1856,169 @@ async def on_message(message):
     await bot.process_commands(message)
 
 
+# ============================================================
+# LEAKS SYSTEM
+# ============================================================
+
+import sqlite3
+
+LEAKS_CHANNEL_NAME = "leaks"
+
+def get_db():
+    conn = sqlite3.connect("leaks.db")
+    conn.row_factory = sqlite3.Row
+    return conn
+
+def init_db():
+    with get_db() as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS leaks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                link TEXT NOT NULL,
+                added_by INTEGER NOT NULL,
+                added_at REAL NOT NULL
+            )
+        """)
+        conn.commit()
+
+def search_leaks(query: str):
+    query = query.lower().strip()
+    with get_db() as conn:
+        rows = conn.execute("SELECT * FROM leaks").fetchall()
+    return [r for r in rows if query in r["name"].lower()]
+
+def get_all_leaks():
+    with get_db() as conn:
+        return conn.execute("SELECT * FROM leaks ORDER BY name ASC").fetchall()
+
+def add_leak(name: str, link: str, user_id: int):
+    with get_db() as conn:
+        try:
+            conn.execute(
+                "INSERT INTO leaks (name, link, added_by, added_at) VALUES (?, ?, ?, ?)",
+                (name.strip(), link.strip(), user_id, time.time())
+            )
+            conn.commit()
+            return True
+        except sqlite3.IntegrityError:
+            return False  # name already exists
+
+def delete_leak(name: str):
+    with get_db() as conn:
+        cursor = conn.execute("DELETE FROM leaks WHERE LOWER(name) = ?", (name.lower().strip(),))
+        conn.commit()
+        return cursor.rowcount > 0
+
+# Initialize DB on load
+init_db()
+
+
+@tree.command(name="leakscreate", description="Add a new leak entry (admin only)")
+@auto_defer(ephemeral=True)
+@app_commands.describe(leak="Name of the leak", link="Download/access link")
+async def leaks_create(interaction: discord.Interaction, leak: str, link: str):
+    if not has_admin_role(interaction.user):
+        return await interaction.followup.send("❌ Admins only.", ephemeral=True)
+
+    success = add_leak(leak, link, interaction.user.id)
+    if not success:
+        return await interaction.followup.send(
+            f"❌ A leak named **{leak}** already exists. Use `/leaksdelete` first if you want to replace it.",
+            ephemeral=True
+        )
+
+    embed = discord.Embed(
+        title="✅ Leak Added",
+        color=discord.Color.green()
+    )
+    embed.add_field(name="Name", value=leak, inline=True)
+    embed.add_field(name="Link", value=link, inline=False)
+    embed.set_footer(text=f"Added by {interaction.user.display_name}")
+    await interaction.followup.send(embed=embed, ephemeral=True)
+
+
+@tree.command(name="leaks", description="Search for a game asset leak by name")
+@auto_defer(ephemeral=True)
+@app_commands.describe(leak="Name or partial name to search for")
+async def leaks_search(interaction: discord.Interaction, leak: str):
+    if interaction.channel.name != LEAKS_CHANNEL_NAME:
+        return await interaction.followup.send(
+            f"❌ This command can only be used in #leaks.", ephemeral=True
+        )
+
+    results = search_leaks(leak)
+
+    if not results:
+        return await interaction.followup.send(
+            f"❌ No leaks found matching **{leak}**.", ephemeral=True
+        )
+
+    embed = discord.Embed(
+        title=f"🔍 Leak Results for \"{leak}\"",
+        color=discord.Color.blurple()
+    )
+
+    for row in results[:10]:  # cap at 10 results
+        added_by = f"<@{row['added_by']}>"
+        embed.add_field(
+            name=row["name"],
+            value=f"[Download Link]({row['link']})\nAdded by {added_by} <t:{int(row['added_at'])}:R>",
+            inline=False
+        )
+
+    if len(results) > 10:
+        embed.set_footer(text=f"Showing 10 of {len(results)} results. Try a more specific search.")
+
+    await interaction.followup.send(embed=embed, ephemeral=True)
+
+
+@tree.command(name="leakslist", description="List all available leaks")
+@auto_defer(ephemeral=True)
+async def leaks_list(interaction: discord.Interaction):
+    if interaction.channel.name != LEAKS_CHANNEL_NAME:
+        return await interaction.followup.send(
+            f"❌ This command can only be used in #leaks.", ephemeral=True
+        )
+
+    rows = get_all_leaks()
+
+    if not rows:
+        return await interaction.followup.send("📭 No leaks in the database yet.", ephemeral=True)
+
+    # Paginate if needed — chunk into groups of 15
+    chunks = [rows[i:i+15] for i in range(0, len(rows), 15)]
+
+    embed = discord.Embed(
+        title="📦 All Available Leaks",
+        description="\n".join(f"• **{r['name']}**" for r in chunks[0]),
+        color=discord.Color.blurple()
+    )
+    embed.set_footer(text=f"Page 1 of {len(chunks)} | {len(rows)} total leaks | Use /leaks <name> to get a download link")
+
+    await interaction.followup.send(embed=embed, ephemeral=True)
+
+
+@tree.command(name="leaksdelete", description="Delete a leak entry (admin only)")
+@auto_defer(ephemeral=True)
+@app_commands.describe(leak="Exact name of the leak to delete")
+async def leaks_delete(interaction: discord.Interaction, leak: str):
+    if not has_admin_role(interaction.user):
+        return await interaction.followup.send("❌ Admins only.", ephemeral=True)
+
+    success = delete_leak(leak)
+    if not success:
+        return await interaction.followup.send(
+            f"❌ No leak found with the name **{leak}**. Names are case-insensitive.",
+            ephemeral=True
+        )
+
+    embed = discord.Embed(
+        title="🗑️ Leak Deleted",
+        description=f"**{leak}** has been removed from the database.",
+        color=discord.Color.red()
+    )
+    await interaction.followup.send(embed=embed, ephemeral=True)
+
+
 bot.run(os.getenv("BOT_TOKEN"))
