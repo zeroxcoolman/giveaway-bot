@@ -1915,7 +1915,7 @@ init_db()
 
 
 @tree.command(name="leakscreate", description="Add a new leak entry (admin only)")
-@auto_defer(ephemeral=True)
+@auto_defer(ephemeral=False)
 @app_commands.describe(leak="Name of the leak", link="Download/access link")
 async def leaks_create(interaction: discord.Interaction, leak: str, link: str):
     if not has_admin_role(interaction.user):
@@ -1935,11 +1935,11 @@ async def leaks_create(interaction: discord.Interaction, leak: str, link: str):
     embed.add_field(name="Name", value=leak, inline=True)
     embed.add_field(name="Link", value=link, inline=False)
     embed.set_footer(text=f"Added by {interaction.user.display_name}")
-    await interaction.followup.send(embed=embed, ephemeral=True)
+    await interaction.followup.send(embed=embed)
 
 
 @tree.command(name="leaks", description="Search for a game asset leak by name")
-@auto_defer(ephemeral=True)
+@auto_defer(ephemeral=False)
 @app_commands.describe(leak="Name or partial name to search for")
 async def leaks_search(interaction: discord.Interaction, leak: str):
     if interaction.channel.name != LEAKS_CHANNEL_NAME:
@@ -1951,7 +1951,7 @@ async def leaks_search(interaction: discord.Interaction, leak: str):
 
     if not results:
         return await interaction.followup.send(
-            f"❌ No leaks found matching **{leak}**.", ephemeral=True
+            f"❌ No leaks found matching **{leak}**."
         )
 
     embed = discord.Embed(
@@ -1959,7 +1959,7 @@ async def leaks_search(interaction: discord.Interaction, leak: str):
         color=discord.Color.blurple()
     )
 
-    for row in results[:10]:  # cap at 10 results
+    for row in results[:10]:
         added_by = f"<@{row['added_by']}>"
         embed.add_field(
             name=row["name"],
@@ -1970,11 +1970,11 @@ async def leaks_search(interaction: discord.Interaction, leak: str):
     if len(results) > 10:
         embed.set_footer(text=f"Showing 10 of {len(results)} results. Try a more specific search.")
 
-    await interaction.followup.send(embed=embed, ephemeral=True)
+    await interaction.followup.send(embed=embed)
 
 
 @tree.command(name="leakslist", description="List all available leaks")
-@auto_defer(ephemeral=True)
+@auto_defer(ephemeral=False)
 async def leaks_list(interaction: discord.Interaction):
     if interaction.channel.name != LEAKS_CHANNEL_NAME:
         return await interaction.followup.send(
@@ -1984,9 +1984,8 @@ async def leaks_list(interaction: discord.Interaction):
     rows = get_all_leaks()
 
     if not rows:
-        return await interaction.followup.send("📭 No leaks in the database yet.", ephemeral=True)
+        return await interaction.followup.send("📭 No leaks in the database yet.")
 
-    # Paginate if needed — chunk into groups of 15
     chunks = [rows[i:i+15] for i in range(0, len(rows), 15)]
 
     embed = discord.Embed(
@@ -1996,11 +1995,11 @@ async def leaks_list(interaction: discord.Interaction):
     )
     embed.set_footer(text=f"Page 1 of {len(chunks)} | {len(rows)} total leaks | Use /leaks <name> to get a download link")
 
-    await interaction.followup.send(embed=embed, ephemeral=True)
+    await interaction.followup.send(embed=embed)
 
 
 @tree.command(name="leaksdelete", description="Delete a leak entry (admin only)")
-@auto_defer(ephemeral=True)
+@auto_defer(ephemeral=False)
 @app_commands.describe(leak="Exact name of the leak to delete")
 async def leaks_delete(interaction: discord.Interaction, leak: str):
     if not has_admin_role(interaction.user):
@@ -2009,8 +2008,7 @@ async def leaks_delete(interaction: discord.Interaction, leak: str):
     success = delete_leak(leak)
     if not success:
         return await interaction.followup.send(
-            f"❌ No leak found with the name **{leak}**. Names are case-insensitive.",
-            ephemeral=True
+            f"❌ No leak found with the name **{leak}**. Names are case-insensitive."
         )
 
     embed = discord.Embed(
@@ -2018,7 +2016,7 @@ async def leaks_delete(interaction: discord.Interaction, leak: str):
         description=f"**{leak}** has been removed from the database.",
         color=discord.Color.red()
     )
-    await interaction.followup.send(embed=embed, ephemeral=True)
+    await interaction.followup.send(embed=embed)
 
 
 bot.run(os.getenv("BOT_TOKEN"))
