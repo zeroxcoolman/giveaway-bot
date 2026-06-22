@@ -1964,7 +1964,7 @@ async def leaks_search(interaction: discord.Interaction, leak: str):
             color=discord.Color.blurple()
         )
         embed.add_field(name="⬇️ Download", value=f"[Click here]({row['link']})", inline=True)
-        embed.add_field(name="🛒 Buy on Payhip", value=f"[Click here]({row['payhip_url']})", inline=True)
+        embed.add_field(name="🛒 See on Payhip", value=f"[Click here]({row['payhip_url']})", inline=True)
         embed.set_footer(text=f"Added <t:{int(row['added_at'])}:R> by user ID {row['added_by']}")
         return await interaction.followup.send(embed=embed)
 
