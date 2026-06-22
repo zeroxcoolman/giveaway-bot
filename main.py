@@ -48,8 +48,8 @@ tree = bot.tree
 
 GIVEAWAY_CHANNEL_NAME = "🎁︱𝒩𝓊𝓂𝒷𝑒𝓇-𝒢𝒾𝓋𝑒𝒶𝓌𝒶𝓎"
 TICKET_CATEGORY_ID = 1348042174159392768
-ADMIN_ROLES = ["Admin"]
-ADMIN_ROLE_IDS = [1517236355275428040]
+ADMIN_ROLES = ["𝓞𝔀𝓷𝓮𝓻 👑", "Tuff nonchalant aurafarmer sigma pro admin", "Administrator™🌟"]
+ADMIN_ROLE_IDS = [1342599762993741855, 1385318110747164775, 1343263454114480161]
 MESSAGES_PER_SHECKLE = 10  # Number of messages needed to earn 1 sheckle
 
 giveaway_logs = []
@@ -1861,6 +1861,7 @@ async def on_message(message):
 # ============================================================
 
 import sqlite3
+import json
 
 LEAKS_CHANNEL_NAME = "𝙇𝙀𝘼𝙆𝙎-𝙍𝙀𝙌𝙐𝙀𝙎𝙏"
 
@@ -1876,6 +1877,7 @@ def init_db():
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL UNIQUE,
                 link TEXT NOT NULL,
+                payhip_url TEXT NOT NULL,
                 added_by INTEGER NOT NULL,
                 added_at REAL NOT NULL
             )
@@ -1892,17 +1894,17 @@ def get_all_leaks():
     with get_db() as conn:
         return conn.execute("SELECT * FROM leaks ORDER BY name ASC").fetchall()
 
-def add_leak(name: str, link: str, user_id: int):
+def add_leak(name: str, link: str, payhip_url: str, user_id: int):
     with get_db() as conn:
         try:
             conn.execute(
-                "INSERT INTO leaks (name, link, added_by, added_at) VALUES (?, ?, ?, ?)",
-                (name.strip(), link.strip(), user_id, time.time())
+                "INSERT INTO leaks (name, link, payhip_url, added_by, added_at) VALUES (?, ?, ?, ?, ?)",
+                (name.strip(), link.strip(), payhip_url.strip(), user_id, time.time())
             )
             conn.commit()
             return True
         except sqlite3.IntegrityError:
-            return False  # name already exists
+            return False
 
 def delete_leak(name: str):
     with get_db() as conn:
@@ -1916,24 +1918,26 @@ init_db()
 
 @tree.command(name="leakscreate", description="Add a new leak entry (admin only)")
 @auto_defer(ephemeral=False)
-@app_commands.describe(leak="Name of the leak", link="Download/access link")
-async def leaks_create(interaction: discord.Interaction, leak: str, link: str):
+@app_commands.describe(
+    leak="Name of the leak",
+    link="Download/access link",
+    payhip="Payhip product link"
+)
+async def leaks_create(interaction: discord.Interaction, leak: str, link: str, payhip: str):
     if not has_admin_role(interaction.user):
         return await interaction.followup.send("❌ Admins only.", ephemeral=True)
 
-    success = add_leak(leak, link, interaction.user.id)
+    success = add_leak(leak, link, payhip, interaction.user.id)
     if not success:
         return await interaction.followup.send(
             f"❌ A leak named **{leak}** already exists. Use `/leaksdelete` first if you want to replace it.",
             ephemeral=True
         )
 
-    embed = discord.Embed(
-        title="✅ Leak Added",
-        color=discord.Color.green()
-    )
-    embed.add_field(name="Name", value=leak, inline=True)
-    embed.add_field(name="Link", value=link, inline=False)
+    embed = discord.Embed(title="✅ Leak Added", color=discord.Color.green())
+    embed.add_field(name="Name", value=leak, inline=False)
+    embed.add_field(name="Download Link", value=link, inline=False)
+    embed.add_field(name="Payhip Link", value=payhip, inline=False)
     embed.set_footer(text=f"Added by {interaction.user.display_name}")
     await interaction.followup.send(embed=embed)
 
@@ -1944,26 +1948,37 @@ async def leaks_create(interaction: discord.Interaction, leak: str, link: str):
 async def leaks_search(interaction: discord.Interaction, leak: str):
     if interaction.channel.name != LEAKS_CHANNEL_NAME:
         return await interaction.followup.send(
-            f"❌ This command can only be used in #𝙇𝙀𝘼𝙆𝙎-𝙍𝙀𝙌𝙐𝙀𝙎𝙏.", ephemeral=True
+            "❌ This command can only be used in #𝙇𝙀𝘼𝙆𝙎-𝙍𝙀𝙌𝙐𝙀𝙎𝙏.", ephemeral=True
         )
 
     results = search_leaks(leak)
 
     if not results:
-        return await interaction.followup.send(
-            f"❌ No leaks found matching **{leak}**."
-        )
+        return await interaction.followup.send(f"❌ No leaks found matching **{leak}**.")
 
+    # Single result — show full embed with payhip
+    if len(results) == 1:
+        row = results[0]
+        embed = discord.Embed(
+            title=f"📦 {row['name']}",
+            color=discord.Color.blurple()
+        )
+        embed.add_field(name="⬇️ Download", value=f"[Click here]({row['link']})", inline=True)
+        embed.add_field(name="🛒 Buy on Payhip", value=f"[Click here]({row['payhip_url']})", inline=True)
+        embed.set_footer(text=f"Added <t:{int(row['added_at'])}:R> by user ID {row['added_by']}")
+        return await interaction.followup.send(embed=embed)
+
+    # Multiple results — simple list, no payhip
     embed = discord.Embed(
-        title=f"🔍 Leak Results for \"{leak}\"",
+        title=f"🔍 Results for \"{leak}\"",
+        description="Multiple matches found. Be more specific to see Payhip links.",
         color=discord.Color.blurple()
     )
 
     for row in results[:10]:
-        added_by = f"<@{row['added_by']}>"
         embed.add_field(
             name=row["name"],
-            value=f"[Download Link]({row['link']})\nAdded by {added_by} <t:{int(row['added_at'])}:R>",
+            value=f"[Download Link]({row['link']})",
             inline=False
         )
 
@@ -1978,7 +1993,7 @@ async def leaks_search(interaction: discord.Interaction, leak: str):
 async def leaks_list(interaction: discord.Interaction):
     if interaction.channel.name != LEAKS_CHANNEL_NAME:
         return await interaction.followup.send(
-            f"❌ This command can only be used in #𝙇𝙀𝘼𝙆𝙎-𝙍𝙀𝙌𝙐𝙀𝙎𝙏.", ephemeral=True
+            "❌ This command can only be used in #𝙇𝙀𝘼𝙆𝙎-𝙍𝙀𝙌𝙐𝙀𝙎𝙏.", ephemeral=True
         )
 
     rows = get_all_leaks()
@@ -1993,7 +2008,9 @@ async def leaks_list(interaction: discord.Interaction):
         description="\n".join(f"• **{r['name']}**" for r in chunks[0]),
         color=discord.Color.blurple()
     )
-    embed.set_footer(text=f"Page 1 of {len(chunks)} | {len(rows)} total leaks | Use /leaks <name> to get a download link")
+    embed.set_footer(
+        text=f"Page 1 of {len(chunks)} | {len(rows)} total leaks | Use /leaks <name> to get links"
+    )
 
     await interaction.followup.send(embed=embed)
 
@@ -2017,6 +2034,39 @@ async def leaks_delete(interaction: discord.Interaction, leak: str):
         color=discord.Color.red()
     )
     await interaction.followup.send(embed=embed)
+
+
+@tree.command(name="leaksexport", description="Export the entire leaks database as a JSON file (admin only)")
+@auto_defer(ephemeral=True)
+async def leaks_export(interaction: discord.Interaction):
+    if not has_admin_role(interaction.user):
+        return await interaction.followup.send("❌ Admins only.", ephemeral=True)
+
+    rows = get_all_leaks()
+
+    if not rows:
+        return await interaction.followup.send("📭 No leaks in the database to export.", ephemeral=True)
+
+    data = [
+        {
+            "id": r["id"],
+            "name": r["name"],
+            "link": r["link"],
+            "payhip_url": r["payhip_url"],
+            "added_by": r["added_by"],
+            "added_at": r["added_at"]
+        }
+        for r in rows
+    ]
+
+    json_bytes = json.dumps(data, indent=2).encode("utf-8")
+    file = discord.File(fp=BytesIO(json_bytes), filename="leaks_export.json")
+
+    await interaction.followup.send(
+        content=f"✅ Exported **{len(data)}** leaks.",
+        file=file,
+        ephemeral=True
+    )
 
 
 bot.run(os.getenv("BOT_TOKEN"))
