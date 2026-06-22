@@ -1944,7 +1944,7 @@ async def leaks_create(interaction: discord.Interaction, leak: str, link: str):
 async def leaks_search(interaction: discord.Interaction, leak: str):
     if interaction.channel.name != LEAKS_CHANNEL_NAME:
         return await interaction.followup.send(
-            f"❌ This command can only be used in #leaks.", ephemeral=True
+            f"❌ This command can only be used in #𝙇𝙀𝘼𝙆𝙎-𝙍𝙀𝙌𝙐𝙀𝙎𝙏.", ephemeral=True
         )
 
     results = search_leaks(leak)
@@ -1978,7 +1978,7 @@ async def leaks_search(interaction: discord.Interaction, leak: str):
 async def leaks_list(interaction: discord.Interaction):
     if interaction.channel.name != LEAKS_CHANNEL_NAME:
         return await interaction.followup.send(
-            f"❌ This command can only be used in #leaks.", ephemeral=True
+            f"❌ This command can only be used in #𝙇𝙀𝘼𝙆𝙎-𝙍𝙀𝙌𝙐𝙀𝙎𝙏.", ephemeral=True
         )
 
     rows = get_all_leaks()
