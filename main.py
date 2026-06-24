@@ -1166,6 +1166,7 @@ async def on_ready():
         if hasattr(giveaway, 'view') and giveaway.view:
             bot.add_view(giveaway.view, message_id=giveaway.view.message.id)
     bot.add_view(CloseTicketView(bot))
+    bot.add_view(SubmitButtonView())
 
     # Garden background tasks are disabled — uncomment to re-enable:
     # refresh_stock.start()
@@ -2302,6 +2303,301 @@ async def leaks_edit(
     embed.add_field(name="Payhip Link", value=updated_payhip, inline=False)
     embed.set_footer(text=f"Edited by {interaction.user.display_name}")
     await interaction.followup.send(embed=embed, ephemeral=True)
+
+
+# ============================================================
+# RATING & FEEDBACK SYSTEM
+# ============================================================
+
+SUBMISSION_CHANNEL_ID = 1519432733313466638  # Channel where the submit panel is posted
+RATING_CHANNEL_ID = 1519432943599091762      # Channel where submitted edits appear
+FEEDBACK_CHANNEL_ID = 1519433070934233158    # Channel where feedback gets posted
+
+# In-memory store for submissions: message_id -> submission data
+# Structure: {
+#   "submitter_id": int,
+#   "display_name": str,
+#   "link": str,
+#   "votes": {user_id: {"score": int, "comment": str}},
+#   "rating_message_id": int,
+#   "rating_channel_id": int
+# }
+rating_submissions = {}
+
+
+def calculate_average(votes: dict) -> float:
+    if not votes:
+        return 0.0
+    return sum(v["score"] for v in votes.values()) / len(votes)
+
+
+def build_rating_embed(submission: dict) -> discord.Embed:
+    votes = submission["votes"]
+    avg = calculate_average(votes)
+    vote_count = len(votes)
+
+    stars = "⭐" * round(avg) if avg > 0 else "No ratings yet"
+
+    embed = discord.Embed(
+        title=f"🎬 {submission['display_name']}'s Edit",
+        color=discord.Color.gold()
+    )
+    embed.add_field(name="🔗 Video Link", value=f"[Click to watch]({submission['link']})", inline=False)
+    embed.add_field(
+        name="⭐ Rating",
+        value=f"{stars}\n**{avg:.1f}/10** from **{vote_count}** vote{'s' if vote_count != 1 else ''}",
+        inline=True
+    )
+
+    # Show last 3 comments
+    comments = [
+        f"**{v['rater_name']}** ({v['score']}/10): {v['comment']}"
+        for v in votes.values()
+        if v.get("comment")
+    ]
+    if comments:
+        embed.add_field(
+            name="💬 Recent Comments",
+            value="\n".join(comments[-3:]),
+            inline=False
+        )
+
+    embed.set_footer(text="Click ⭐ Rate to vote • Click 💬 Feedback for detailed feedback")
+    return embed
+
+
+class RateModal(discord.ui.Modal, title="Rate This Edit"):
+    score = discord.ui.TextInput(
+        label="Score (1-10)",
+        placeholder="Enter a number from 1 to 10",
+        min_length=1,
+        max_length=2
+    )
+    comment = discord.ui.TextInput(
+        label="Comment (optional)",
+        placeholder="What did you think?",
+        required=False,
+        style=discord.TextStyle.paragraph,
+        max_length=300
+    )
+
+    def __init__(self, submission_id: int):
+        super().__init__()
+        self.submission_id = submission_id
+
+    async def on_submit(self, interaction: discord.Interaction):
+        submission = rating_submissions.get(self.submission_id)
+        if not submission:
+            return await interaction.response.send_message("❌ This submission no longer exists.", ephemeral=True)
+
+        # Validate score
+        try:
+            score = int(self.score.value.strip())
+            if not 1 <= score <= 10:
+                raise ValueError
+        except ValueError:
+            return await interaction.response.send_message("❌ Score must be a number between 1 and 10.", ephemeral=True)
+
+        # Block self-rating
+        if interaction.user.id == submission["submitter_id"]:
+            return await interaction.response.send_message("❌ You can't rate your own edit!", ephemeral=True)
+
+        # Save vote
+        submission["votes"][interaction.user.id] = {
+            "score": score,
+            "comment": self.comment.value.strip() if self.comment.value else "",
+            "rater_name": interaction.user.display_name
+        }
+
+        # Update the rating embed
+        try:
+            channel = interaction.guild.get_channel(submission["rating_channel_id"])
+            if channel:
+                msg = await channel.fetch_message(submission["rating_message_id"])
+                view = RatingView(self.submission_id)
+                await msg.edit(embed=build_rating_embed(submission), view=view)
+        except Exception as e:
+            print(f"Error updating rating embed: {e}")
+
+        await interaction.response.send_message(
+            f"✅ Rated **{submission['display_name']}'s** edit **{score}/10**!",
+            ephemeral=True
+        )
+
+
+class FeedbackModal(discord.ui.Modal, title="Give Feedback"):
+    feedback = discord.ui.TextInput(
+        label="Your Feedback",
+        placeholder="Be constructive! What worked, what could be improved?",
+        style=discord.TextStyle.paragraph,
+        min_length=10,
+        max_length=1000
+    )
+
+    def __init__(self, submission_id: int):
+        super().__init__()
+        self.submission_id = submission_id
+
+    async def on_submit(self, interaction: discord.Interaction):
+        submission = rating_submissions.get(self.submission_id)
+        if not submission:
+            return await interaction.response.send_message("❌ This submission no longer exists.", ephemeral=True)
+
+        if not FEEDBACK_CHANNEL_ID:
+            return await interaction.response.send_message("❌ Feedback channel not configured yet.", ephemeral=True)
+
+        feedback_channel = interaction.guild.get_channel(FEEDBACK_CHANNEL_ID)
+        if not feedback_channel:
+            return await interaction.response.send_message("❌ Feedback channel not found.", ephemeral=True)
+
+        # Build feedback embed
+        embed = discord.Embed(
+            title=f"💬 Feedback for {submission['display_name']}'s Edit",
+            description=self.feedback.value,
+            color=discord.Color.blurple()
+        )
+        embed.add_field(name="🔗 Video", value=f"[Watch here]({submission['link']})", inline=True)
+        embed.add_field(name="📝 From", value=interaction.user.mention, inline=True)
+
+        avg = calculate_average(submission["votes"])
+        if avg > 0:
+            embed.add_field(name="⭐ Current Rating", value=f"{avg:.1f}/10", inline=True)
+
+        embed.set_footer(text=f"Submitted by {submission['display_name']}")
+
+        # Ping the submitter
+        submitter = interaction.guild.get_member(submission["submitter_id"])
+        ping = submitter.mention if submitter else f"<@{submission['submitter_id']}>"
+
+        await feedback_channel.send(content=f"{ping} you received new feedback!", embed=embed)
+        await interaction.response.send_message("✅ Feedback submitted!", ephemeral=True)
+
+
+class RatingView(discord.ui.View):
+    def __init__(self, submission_id: int):
+        super().__init__(timeout=None)
+        self.submission_id = submission_id
+
+    @discord.ui.button(label="⭐ Rate", style=discord.ButtonStyle.green, custom_id="rate_button")
+    async def rate(self, interaction: discord.Interaction, button: discord.ui.Button):
+        submission = rating_submissions.get(self.submission_id)
+        if not submission:
+            return await interaction.response.send_message("❌ This submission no longer exists.", ephemeral=True)
+        if interaction.user.id == submission["submitter_id"]:
+            return await interaction.response.send_message("❌ You can't rate your own edit!", ephemeral=True)
+        await interaction.response.send_modal(RateModal(self.submission_id))
+
+    @discord.ui.button(label="💬 Feedback", style=discord.ButtonStyle.blurple, custom_id="feedback_button")
+    async def feedback(self, interaction: discord.Interaction, button: discord.ui.Button):
+        submission = rating_submissions.get(self.submission_id)
+        if not submission:
+            return await interaction.response.send_message("❌ This submission no longer exists.", ephemeral=True)
+        await interaction.response.send_modal(FeedbackModal(self.submission_id))
+
+
+class SubmitEditModal(discord.ui.Modal, title="Submit Your Edit"):
+    display_name = discord.ui.TextInput(
+        label="Display Name",
+        placeholder="How should you appear? (e.g. kyrnx)",
+        max_length=50
+    )
+    link = discord.ui.TextInput(
+        label="Video Link",
+        placeholder="https://www.tiktok.com/... or YouTube, Drive, etc.",
+        max_length=500
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if not RATING_CHANNEL_ID:
+            return await interaction.response.send_message("❌ Rating channel not configured yet.", ephemeral=True)
+
+        rating_channel = interaction.guild.get_channel(RATING_CHANNEL_ID)
+        if not rating_channel:
+            return await interaction.response.send_message("❌ Rating channel not found.", ephemeral=True)
+
+        # Create submission
+        submission = {
+            "submitter_id": interaction.user.id,
+            "display_name": self.display_name.value.strip(),
+            "link": self.link.value.strip(),
+            "votes": {},
+            "rating_message_id": None,
+            "rating_channel_id": RATING_CHANNEL_ID
+        }
+
+        # Post to rating channel
+        temp_id = interaction.id  # Temporary key
+        rating_submissions[temp_id] = submission
+
+        embed = build_rating_embed(submission)
+        view = RatingView(temp_id)
+
+        msg = await rating_channel.send(embed=embed, view=view)
+
+        # Update submission with real message ID and re-key by message ID
+        submission["rating_message_id"] = msg.id
+        rating_submissions[msg.id] = submission
+        del rating_submissions[temp_id]
+
+        # Update view with correct ID
+        view2 = RatingView(msg.id)
+        await msg.edit(view=view2)
+
+        await interaction.response.send_message(
+            f"✅ Your edit has been submitted to {rating_channel.mention}!",
+            ephemeral=True
+        )
+
+
+class SubmitButtonView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="🎬 Submit Your Edit", style=discord.ButtonStyle.green, custom_id="submit_edit_button")
+    async def submit_edit(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(SubmitEditModal())
+
+
+@tree.command(name="ratingsetup", description="Post the edit submission panel (admin only)")
+@auto_defer(ephemeral=True)
+async def rating_setup(interaction: discord.Interaction):
+    if not has_admin_role(interaction.user):
+        return await interaction.followup.send("❌ Admins only.", ephemeral=True)
+
+    if not SUBMISSION_CHANNEL_ID:
+        return await interaction.followup.send("❌ SUBMISSION_CHANNEL_ID is not set in the bot config.", ephemeral=True)
+
+    if not RATING_CHANNEL_ID:
+        return await interaction.followup.send("❌ RATING_CHANNEL_ID is not set in the bot config.", ephemeral=True)
+
+    if not FEEDBACK_CHANNEL_ID:
+        return await interaction.followup.send("❌ FEEDBACK_CHANNEL_ID is not set in the bot config.", ephemeral=True)
+
+    if interaction.channel_id != SUBMISSION_CHANNEL_ID:
+        submission_channel = interaction.guild.get_channel(SUBMISSION_CHANNEL_ID)
+        mention = submission_channel.mention if submission_channel else f"channel ID {SUBMISSION_CHANNEL_ID}"
+        return await interaction.followup.send(
+            f"❌ The submission panel can only be posted in {mention}.",
+            ephemeral=True
+        )
+
+    embed = discord.Embed(
+        title="🎬 Submit Your Edit for Rating",
+        description=(
+            "Want feedback on your edit? Click the button below to submit!\n\n"
+            "**How it works:**\n"
+            "1. Click the button and fill in your display name + video link\n"
+            "2. Your edit gets posted in the ratings channel\n"
+            "3. Others can rate it out of 10 and leave feedback\n"
+            "4. You'll get pinged when feedback comes in"
+        ),
+        color=discord.Color.gold()
+    )
+    embed.set_footer(text="Be constructive with feedback • One vote per person")
+
+    view = SubmitButtonView()
+    await interaction.channel.send(embed=embed, view=view)
+    await interaction.followup.send("✅ Rating panel posted!", ephemeral=True)
 
 
 bot.run(os.getenv("BOT_TOKEN"))
