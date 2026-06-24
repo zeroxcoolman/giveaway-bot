@@ -1798,6 +1798,64 @@ async def on_message(message):
     if message.author.bot:
         return
 
+    # ── JSON import handler ──────────────────────────────────
+    if message.author.id in pending_imports and message.attachments:
+        pending = pending_imports[message.author.id]
+        if message.channel.id == pending["channel_id"]:
+            attachment = next((a for a in message.attachments if a.filename.endswith(".json")), None)
+            if attachment:
+                del pending_imports[message.author.id]
+                try:
+                    raw = await attachment.read()
+                    data = json.loads(raw.decode("utf-8"))
+
+                    if not isinstance(data, list):
+                        await message.reply("❌ Invalid format — expected a JSON array.")
+                        return
+
+                    mode = pending["mode"]
+                    added = 0
+                    skipped = 0
+
+                    with get_db() as conn:
+                        if mode == "replace":
+                            conn.execute("DELETE FROM leaks")
+                            conn.commit()
+
+                        for entry in data:
+                            try:
+                                conn.execute(
+                                    "INSERT INTO leaks (name, link, payhip_url, added_by, added_at) VALUES (?, ?, ?, ?, ?)",
+                                    (
+                                        entry["name"].strip(),
+                                        entry["link"].strip(),
+                                        entry["payhip_url"].strip(),
+                                        entry.get("added_by", message.author.id),
+                                        entry.get("added_at", time.time())
+                                    )
+                                )
+                                added += 1
+                            except (sqlite3.IntegrityError, KeyError):
+                                skipped += 1
+                        conn.commit()
+
+                    embed = discord.Embed(
+                        title="✅ Import Complete",
+                        color=discord.Color.green()
+                    )
+                    embed.add_field(name="Mode", value=mode.capitalize(), inline=True)
+                    embed.add_field(name="Added", value=str(added), inline=True)
+                    embed.add_field(name="Skipped", value=str(skipped), inline=True)
+                    if skipped > 0:
+                        embed.set_footer(text="Skipped entries already exist or had missing fields.")
+                    await message.reply(embed=embed)
+                    return
+
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    await message.reply("❌ Couldn't parse the file — make sure it's a valid JSON file.")
+                    return
+
+    # ── Sheckle counting ────────────────────────────────────
     user_message_counts[message.author.id] += 1
     if user_message_counts[message.author.id] % MESSAGES_PER_SHECKLE == 0:
         user_sheckles[message.author.id] += 1
@@ -1864,6 +1922,8 @@ import sqlite3
 import json
 
 LEAKS_CHANNEL_NAME = "𝙇𝙀𝘼𝙆𝙎-𝙍𝙀𝙌𝙐𝙀𝙎𝙏"
+PAGE_SIZE = 15
+SEARCH_PAGE_SIZE = 10
 
 def get_db():
     conn = sqlite3.connect("leaks.db")
@@ -1915,6 +1975,143 @@ def delete_leak(name: str):
 # Initialize DB on load
 init_db()
 
+# Tracks pending imports: user_id -> {"mode": "merge"|"replace", "channel_id": int}
+pending_imports = {}
+
+
+def build_list_embed(rows, page: int) -> discord.Embed:
+    total_pages = max(1, (len(rows) + PAGE_SIZE - 1) // PAGE_SIZE)
+    start = page * PAGE_SIZE
+    chunk = rows[start:start + PAGE_SIZE]
+    embed = discord.Embed(
+        title="📦 All Available Leaks",
+        description="\n".join(f"• **{r['name']}**" for r in chunk),
+        color=discord.Color.blurple()
+    )
+    embed.set_footer(
+        text=f"Page {page + 1} of {total_pages} | {len(rows)} total leaks | Use /leaks <name> to get links"
+    )
+    return embed
+
+
+def build_search_embed(results, query: str, page: int) -> discord.Embed:
+    total_pages = max(1, (len(results) + SEARCH_PAGE_SIZE - 1) // SEARCH_PAGE_SIZE)
+    start = page * SEARCH_PAGE_SIZE
+    chunk = results[start:start + SEARCH_PAGE_SIZE]
+    embed = discord.Embed(
+        title=f"🔍 Results for \"{query}\"",
+        description="Multiple matches found. Be more specific to see Payhip links.",
+        color=discord.Color.blurple()
+    )
+    for row in chunk:
+        embed.add_field(
+            name=row["name"],
+            value=f"[Download Link]({row['link']})",
+            inline=False
+        )
+    embed.set_footer(text=f"Page {page + 1} of {total_pages} | {len(results)} results")
+    return embed
+
+
+class LeaksListView(discord.ui.View):
+    def __init__(self, rows, page: int = 0):
+        super().__init__(timeout=120)
+        self.rows = rows
+        self.page = page
+        self.total_pages = max(1, (len(rows) + PAGE_SIZE - 1) // PAGE_SIZE)
+        self._update_buttons()
+
+    def _update_buttons(self):
+        self.prev_btn.disabled = self.page == 0
+        self.next_btn.disabled = self.page >= self.total_pages - 1
+
+    @discord.ui.button(label="◀ Previous", style=discord.ButtonStyle.gray)
+    async def prev_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.page -= 1
+        self._update_buttons()
+        await interaction.response.edit_message(embed=build_list_embed(self.rows, self.page), view=self)
+
+    @discord.ui.button(label="Next ▶", style=discord.ButtonStyle.gray)
+    async def next_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.page += 1
+        self._update_buttons()
+        await interaction.response.edit_message(embed=build_list_embed(self.rows, self.page), view=self)
+
+    async def on_timeout(self):
+        for item in self.children:
+            item.disabled = True
+
+
+class LeaksSearchView(discord.ui.View):
+    def __init__(self, results, query: str, page: int = 0):
+        super().__init__(timeout=120)
+        self.results = results
+        self.query = query
+        self.page = page
+        self.total_pages = max(1, (len(results) + SEARCH_PAGE_SIZE - 1) // SEARCH_PAGE_SIZE)
+        self._update_buttons()
+
+    def _update_buttons(self):
+        self.prev_btn.disabled = self.page == 0
+        self.next_btn.disabled = self.page >= self.total_pages - 1
+
+    @discord.ui.button(label="◀ Previous", style=discord.ButtonStyle.gray)
+    async def prev_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.page -= 1
+        self._update_buttons()
+        await interaction.response.edit_message(embed=build_search_embed(self.results, self.query, self.page), view=self)
+
+    @discord.ui.button(label="Next ▶", style=discord.ButtonStyle.gray)
+    async def next_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.page += 1
+        self._update_buttons()
+        await interaction.response.edit_message(embed=build_search_embed(self.results, self.query, self.page), view=self)
+
+    async def on_timeout(self):
+        for item in self.children:
+            item.disabled = True
+
+
+class ImportModeView(discord.ui.View):
+    def __init__(self, admin_id: int, channel_id: int):
+        super().__init__(timeout=60)
+        self.admin_id = admin_id
+        self.channel_id = channel_id
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.admin_id:
+            await interaction.response.send_message("❌ This isn't your import.", ephemeral=True)
+            return False
+        return True
+
+    @discord.ui.button(label="Merge", style=discord.ButtonStyle.green)
+    async def merge(self, interaction: discord.Interaction, button: discord.ui.Button):
+        pending_imports[self.admin_id] = {"mode": "merge", "channel_id": self.channel_id}
+        for item in self.children:
+            item.disabled = True
+        await interaction.response.edit_message(
+            content="✅ Mode set to **Merge**. Now send the `.json` file in this channel.",
+            view=self
+        )
+
+    @discord.ui.button(label="Replace", style=discord.ButtonStyle.red)
+    async def replace(self, interaction: discord.Interaction, button: discord.ui.Button):
+        pending_imports[self.admin_id] = {"mode": "replace", "channel_id": self.channel_id}
+        for item in self.children:
+            item.disabled = True
+        await interaction.response.edit_message(
+            content="✅ Mode set to **Replace** (⚠️ this will wipe the current database). Now send the `.json` file in this channel.",
+            view=self
+        )
+
+    async def on_timeout(self):
+        for item in self.children:
+            item.disabled = True
+
+
+# ============================================================
+# LEAKS COMMANDS
+# ============================================================
 
 @tree.command(name="leakscreate", description="Add a new leak entry (admin only)")
 @auto_defer(ephemeral=False)
@@ -1956,36 +2153,18 @@ async def leaks_search(interaction: discord.Interaction, leak: str):
     if not results:
         return await interaction.followup.send(f"❌ No leaks found matching **{leak}**.")
 
-    # Single result — show full embed with payhip
+    # Single result — show full embed with payhip, no pagination needed
     if len(results) == 1:
         row = results[0]
-        embed = discord.Embed(
-            title=f"📦 {row['name']}",
-            color=discord.Color.blurple()
-        )
+        embed = discord.Embed(title=f"📦 {row['name']}", color=discord.Color.blurple())
         embed.add_field(name="⬇️ Download", value=f"[Click here]({row['link']})", inline=True)
-        embed.add_field(name="🛒 See on Payhip", value=f"[Click here]({row['payhip_url']})", inline=True)
+        embed.add_field(name="🛒 Buy on Payhip", value=f"[Click here]({row['payhip_url']})", inline=True)
         embed.set_footer(text=f"Added <t:{int(row['added_at'])}:R> by user ID {row['added_by']}")
         return await interaction.followup.send(embed=embed)
 
-    # Multiple results — simple list, no payhip
-    embed = discord.Embed(
-        title=f"🔍 Results for \"{leak}\"",
-        description="Multiple matches found. Be more specific to see Payhip links.",
-        color=discord.Color.blurple()
-    )
-
-    for row in results[:10]:
-        embed.add_field(
-            name=row["name"],
-            value=f"[Download Link]({row['link']})",
-            inline=False
-        )
-
-    if len(results) > 10:
-        embed.set_footer(text=f"Showing 10 of {len(results)} results. Try a more specific search.")
-
-    await interaction.followup.send(embed=embed)
+    # Multiple results — paginated, no payhip
+    view = LeaksSearchView(results, leak)
+    await interaction.followup.send(embed=build_search_embed(results, leak, 0), view=view)
 
 
 @tree.command(name="leakslist", description="List all available leaks")
@@ -2001,18 +2180,8 @@ async def leaks_list(interaction: discord.Interaction):
     if not rows:
         return await interaction.followup.send("📭 No leaks in the database yet.")
 
-    chunks = [rows[i:i+15] for i in range(0, len(rows), 15)]
-
-    embed = discord.Embed(
-        title="📦 All Available Leaks",
-        description="\n".join(f"• **{r['name']}**" for r in chunks[0]),
-        color=discord.Color.blurple()
-    )
-    embed.set_footer(
-        text=f"Page 1 of {len(chunks)} | {len(rows)} total leaks | Use /leaks <name> to get links"
-    )
-
-    await interaction.followup.send(embed=embed)
+    view = LeaksListView(rows)
+    await interaction.followup.send(embed=build_list_embed(rows, 0), view=view)
 
 
 @tree.command(name="leaksdelete", description="Delete a leak entry (admin only)")
@@ -2049,7 +2218,6 @@ async def leaks_export(interaction: discord.Interaction):
 
     data = [
         {
-            "id": r["id"],
             "name": r["name"],
             "link": r["link"],
             "payhip_url": r["payhip_url"],
@@ -2061,12 +2229,79 @@ async def leaks_export(interaction: discord.Interaction):
 
     json_bytes = json.dumps(data, indent=2).encode("utf-8")
     file = discord.File(fp=BytesIO(json_bytes), filename="leaks_export.json")
+    await interaction.followup.send(content=f"✅ Exported **{len(data)}** leaks.", file=file, ephemeral=True)
 
+
+@tree.command(name="leaksimport", description="Import leaks from a JSON file (admin only)")
+@auto_defer(ephemeral=True)
+async def leaks_import(interaction: discord.Interaction):
+    if not has_admin_role(interaction.user):
+        return await interaction.followup.send("❌ Admins only.", ephemeral=True)
+
+    view = ImportModeView(interaction.user.id, interaction.channel_id)
     await interaction.followup.send(
-        content=f"✅ Exported **{len(data)}** leaks.",
-        file=file,
+        "📂 Choose import mode:\n"
+        "**Merge** — keep existing leaks, only add new ones\n"
+        "**Replace** — wipe the database and import fresh",
+        view=view,
         ephemeral=True
     )
+
+
+@tree.command(name="leaksedit", description="Edit an existing leak entry (admin only)")
+@auto_defer(ephemeral=True)
+@app_commands.describe(
+    leak="Exact name of the leak to edit",
+    newname="New name (leave blank to keep current)",
+    newlink="New download link (leave blank to keep current)",
+    newpayhip="New Payhip link (leave blank to keep current)"
+)
+async def leaks_edit(
+    interaction: discord.Interaction,
+    leak: str,
+    newname: Optional[str] = None,
+    newlink: Optional[str] = None,
+    newpayhip: Optional[str] = None
+):
+    if not has_admin_role(interaction.user):
+        return await interaction.followup.send("❌ Admins only.", ephemeral=True)
+
+    if not any([newname, newlink, newpayhip]):
+        return await interaction.followup.send(
+            "❌ You need to provide at least one field to update.", ephemeral=True
+        )
+
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT * FROM leaks WHERE LOWER(name) = ?", (leak.lower().strip(),)
+        ).fetchone()
+
+        if not row:
+            return await interaction.followup.send(
+                f"❌ No leak found with the name **{leak}**.", ephemeral=True
+            )
+
+        updated_name = newname.strip() if newname else row["name"]
+        updated_link = newlink.strip() if newlink else row["link"]
+        updated_payhip = newpayhip.strip() if newpayhip else row["payhip_url"]
+
+        try:
+            conn.execute(
+                "UPDATE leaks SET name = ?, link = ?, payhip_url = ? WHERE id = ?",
+                (updated_name, updated_link, updated_payhip, row["id"])
+            )
+            conn.commit()
+        except sqlite3.IntegrityError:
+            return await interaction.followup.send(
+                f"❌ A leak named **{updated_name}** already exists.", ephemeral=True
+            )
+
+    embed = discord.Embed(title="✏️ Leak Updated", color=discord.Color.yellow())
+    embed.add_field(name="Name", value=f"~~{row['name']}~~ → {updated_name}" if newname else updated_name, inline=False)
+    embed.add_field(name="Download Link", value=updated_link, inline=False)
+    embed.add_field(name="Payhip Link", value=updated_payhip, inline=False)
+    embed.set_footer(text=f"Edited by {interaction.user.display_name}")
+    await interaction.followup.send(embed=embed, ephemeral=True)
 
 
 bot.run(os.getenv("BOT_TOKEN"))
