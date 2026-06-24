@@ -48,8 +48,8 @@ tree = bot.tree
 
 GIVEAWAY_CHANNEL_NAME = "🎁︱𝒩𝓊𝓂𝒷𝑒𝓇-𝒢𝒾𝓋𝑒𝒶𝓌𝒶𝓎"
 TICKET_CATEGORY_ID = 1348042174159392768
-ADMIN_ROLES = ["𝓞𝔀𝓷𝓮𝓻 👑", "Tuff nonchalant aurafarmer sigma pro admin", "Administrator™🌟"]
-ADMIN_ROLE_IDS = [1342599762993741855, 1385318110747164775, 1343263454114480161]
+ADMIN_ROLES = ["Admin"]
+ADMIN_ROLE_IDS = [1517236355275428040]
 MESSAGES_PER_SHECKLE = 10  # Number of messages needed to earn 1 sheckle
 
 giveaway_logs = []
@@ -106,7 +106,6 @@ achievement_definitions = {
         "condition": lambda uid: any(s.name in ["Sugar Apple", "Beanstalk"] for s in user_inventory[uid]["grown"]),
         "description": "Grow a legendary plant"
     },
-    # Add more achievements as needed
 }
 
 current_season = {
@@ -124,7 +123,7 @@ SEASONS = [
 
 seeds = {
     "Carrot": (2, 250),
-    "Strawberry": (10, 50), # (Sheckles, Messages For quest)
+    "Strawberry": (10, 50),
     "Potato": (5, 0),
     "Bamboo": (20, 300),
     "Ember Lily": (55, 550),
@@ -206,6 +205,10 @@ limited_seeds = {}
 trade_offers = defaultdict(list)  # user_id -> dict with keys: sender_id, seed_name, timestamp
 trade_logs = []
 
+# ============================================================
+# TICKET / MIDDLEMAN SYSTEM
+# ============================================================
+
 class CloseTicketView(discord.ui.View):
     def __init__(self, bot):
         super().__init__(timeout=None)
@@ -250,7 +253,6 @@ class MiddlemanModal(discord.ui.Modal, title="Apply for Middleman"):
         self.interaction = interaction
 
     async def on_submit(self, interaction: discord.Interaction):
-        # ✅ Check confirmation
         if self.confirm.value.strip().lower() != "yes i understand.":
             blacklist_role = interaction.guild.get_role(1344056030153146448)
             if blacklist_role:
@@ -261,8 +263,6 @@ class MiddlemanModal(discord.ui.Modal, title="Apply for Middleman"):
             )
     
         guild = interaction.guild
-    
-        # Get the ticket category
         ticket_category = guild.get_channel(TICKET_CATEGORY_ID)
         if not ticket_category or not isinstance(ticket_category, discord.CategoryChannel):
             return await interaction.response.send_message("❌ Ticket category not found.", ephemeral=True)
@@ -271,10 +271,8 @@ class MiddlemanModal(discord.ui.Modal, title="Apply for Middleman"):
         if not middleman_role:
             return await interaction.response.send_message("❌ Middleman role not found.", ephemeral=True)
     
-        # ✅ Create the ticket
         ticket_number = len([c for c in ticket_category.channels if isinstance(c, discord.TextChannel) and c.name.startswith("ticket-")]) + 1
         
-        # Create overwrites
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(read_messages=False),
             interaction.user: discord.PermissionOverwrite(read_messages=True, send_messages=True),
@@ -295,7 +293,6 @@ class MiddlemanModal(discord.ui.Modal, title="Apply for Middleman"):
                 ephemeral=True
             )
     
-        # ✅ Create the embed with all Q&A
         embed = discord.Embed(
             title="📨 Middleman Ticket Application",
             color=discord.Color.green()
@@ -307,14 +304,11 @@ class MiddlemanModal(discord.ui.Modal, title="Apply for Middleman"):
         embed.set_footer(text=f"Ticket opened by {interaction.user.display_name}", icon_url=interaction.user.display_avatar.url)
     
         try:
-            # Send the embed + close button into the ticket
             await ticket_channel.send(
                 content=middleman_role.mention,
                 embed=embed,
                 view=CloseTicketView(self.bot)
             )
-            
-            # Confirm to the user
             await interaction.response.send_message(
                 f"✅ Ticket created: {ticket_channel.mention}",
                 ephemeral=True
@@ -326,6 +320,10 @@ class MiddlemanModal(discord.ui.Modal, title="Apply for Middleman"):
                 ephemeral=True
             )
 
+# ============================================================
+# TRADING SYSTEM
+# ============================================================
+
 class TradeView(View):
     def __init__(self, sender, recipient, sender_seed, recipient_seed, original_message=None, viewer=None, trade_messages=None):
         super().__init__(timeout=300)
@@ -335,28 +333,23 @@ class TradeView(View):
         self.recipient_seed = recipient_seed
         self.original_message = original_message
         self.viewer = viewer
-        self.trade_messages = trade_messages or []  # List of message IDs for this trade
+        self.trade_messages = trade_messages or []
         
-        # Remove Cancel button if viewer is not the sender
         if viewer and viewer.id != sender.id:
             for item in self.children:
                 if isinstance(item, discord.ui.Button) and item.label == "Cancel Trade":
                     self.remove_item(item)
 
     async def update_all_messages(self, interaction, embed):
-        """Update all messages related to this trade"""
         messages_to_update = []
         
-        # Add original message if exists
         if self.original_message:
             try:
-                # Refresh the message reference
                 self.original_message = await interaction.channel.fetch_message(self.original_message.id)
                 messages_to_update.append(self.original_message)
             except discord.NotFound:
                 pass
                 
-        # Add trade offer messages
         for msg_id in self.trade_messages:
             try:
                 msg = await interaction.channel.fetch_message(msg_id)
@@ -364,12 +357,10 @@ class TradeView(View):
             except:
                 pass
         
-        # Disable all buttons in the current view
         for item in self.children:
             if isinstance(item, discord.ui.Button):
                 item.disabled = True
         
-        # Handle the interaction response first
         try:
             if not interaction.response.is_done():
                 await interaction.response.edit_message(embed=embed, view=self)
@@ -382,13 +373,11 @@ class TradeView(View):
             except:
                 pass
         
-        # Update other messages (excluding the current interaction message)
         current_msg_id = interaction.message.id if hasattr(interaction, 'message') else None
         
         for msg in messages_to_update:
-            if msg.id != current_msg_id:  # Don't update the message we just responded to
+            if msg.id != current_msg_id:
                 try:
-                    # Create a new disabled view for each message
                     disabled_view = TradeView(
                         self.sender, 
                         self.recipient, 
@@ -396,7 +385,6 @@ class TradeView(View):
                         self.recipient_seed,
                         viewer=self.viewer
                     )
-                    # Disable all buttons in the new view
                     for item in disabled_view.children:
                         if isinstance(item, discord.ui.Button):
                             item.disabled = True
@@ -413,14 +401,12 @@ class TradeView(View):
             return
         
         try:
-            # Perform the trade
             update_growing_seeds(self.sender.id)
             update_growing_seeds(self.recipient.id)
             
             sender_grown = user_inventory[self.sender.id]["grown"]
             recipient_grown = user_inventory[self.recipient.id]["grown"]
             
-            # Find exact seeds
             sender_seed = next((s for s in sender_grown if s.name == self.sender_seed.name and s.mutation == self.sender_seed.mutation), None)
             recipient_seed = next((s for s in recipient_grown if s.name == self.recipient_seed.name and s.mutation == self.recipient_seed.mutation), None)
             
@@ -433,7 +419,6 @@ class TradeView(View):
                 )
                 return await safe_send_ephemeral(interaction, "❌ One or both seeds no longer available.")
             
-            # Perform swap
             sender_grown.remove(sender_seed)
             recipient_grown.remove(recipient_seed)
             sender_grown.append(recipient_seed)
@@ -454,7 +439,6 @@ class TradeView(View):
                 self.recipient_seed.name
             )
     
-            # Create success embed
             embed = discord.Embed(
                 title="✅ Trade Completed",
                 description=(
@@ -464,10 +448,8 @@ class TradeView(View):
                 color=discord.Color.green()
             )
             
-            # Update all messages
             await self.update_all_messages(interaction, embed)
     
-            # Notify both parties via DM
             try:
                 await self.sender.send(
                     f"✅ Your trade with {self.recipient.mention} was accepted!\n"
@@ -496,7 +478,6 @@ class TradeView(View):
             except:
                 pass
 
-    
     @discord.ui.button(label="Decline Trade", style=ButtonStyle.red)
     async def decline(self, interaction: discord.Interaction, button: Button):
         if interaction.user.id != self.recipient.id:
@@ -510,7 +491,6 @@ class TradeView(View):
             self.recipient_seed.name
         )
     
-        # Update all messages
         embed = discord.Embed(
             title="❌ Trade Declined",
             description=f"{self.recipient.mention} declined the trade offer from {self.sender.mention}",
@@ -519,7 +499,6 @@ class TradeView(View):
             
         await self.update_all_messages(interaction, embed)
     
-        # Notify sender
         try:
             await self.sender.send(f"❌ {self.recipient.mention} declined your trade offer.")
         except:
@@ -538,7 +517,6 @@ class TradeView(View):
             self.recipient_seed.name
         )
     
-        # Update all messages
         embed = discord.Embed(
             title="🚫 Trade Cancelled",
             description=f"{self.sender.mention} cancelled the trade offer.",
@@ -547,11 +525,14 @@ class TradeView(View):
     
         await self.update_all_messages(interaction, embed)
     
-        # Notify recipient
         try:
             await self.recipient.send(f"🚫 {self.sender.mention} cancelled their trade offer.")
         except:
             pass
+
+# ============================================================
+# GIVEAWAY SYSTEM
+# ============================================================
 
 class Giveaway:
     def __init__(self, hoster, prize, winners, number_range, target, duration, channel):
@@ -567,18 +548,16 @@ class Giveaway:
         self.participants = set()
         self.guessed_users = {}
         self.user_guesses = {}
-        self.end_time = time.time() + (duration * 60) if duration > 0 else None  # None for no time limit
+        self.end_time = time.time() + (duration * 60) if duration > 0 else None
         self.task = None
 
     def check_guess(self, user, guess):
-        # First check if giveaway has ended (only if it has an end time)
         if self.end_time is not None and time.time() > self.end_time:
-            return None  # Giveaway has ended
-            
-        if user.id == self.hoster.id:  # Host can't participate
             return None
             
-        # Track participation
+        if user.id == self.hoster.id:
+            return None
+            
         self.participants.add(user)
         
         if user.id not in self.guessed_users:
@@ -595,13 +574,11 @@ class GuessModal(discord.ui.Modal, title='Enter Your Guess'):
         self.giveaway = giveaway
     
     async def on_submit(self, interaction: discord.Interaction):
-        # Check host
         if interaction.user.id == self.giveaway.hoster.id:
             return await interaction.response.send_message(
                 "❌ You can't participate in your own giveaway!",
                 ephemeral=True
             )
-        # Check if giveaway has ended
         if time.time() > self.giveaway.end_time:
             return await interaction.response.send_message(
                 "❌ This giveaway has already ended!",
@@ -618,7 +595,6 @@ class GuessModal(discord.ui.Modal, title='Enter Your Guess'):
                 
             self.giveaway.user_guesses.setdefault(interaction.user.id, []).append(guess)
             
-            # Check if guess is correct
             if self.giveaway.check_guess(interaction.user, guess):
                 self.giveaway.winners.add(interaction.user)
                 
@@ -627,7 +603,6 @@ class GuessModal(discord.ui.Modal, title='Enter Your Guess'):
                     ephemeral=True
                 )
                 
-                # Check if we have enough winners
                 if len(self.giveaway.winners) >= self.giveaway.winners_required:
                     await end_giveaway(self.giveaway)
             else:
@@ -646,9 +621,8 @@ class GiveawayView(discord.ui.View):
     def __init__(self, giveaway: Giveaway):
         super().__init__(timeout=None)
         self.giveaway = giveaway
-        self.message = None  # Will be set externally when message is sent
+        self.message = None
 
-        # Disable buttons immediately if giveaway has already ended
         if time.time() > giveaway.end_time:
             self.disable_expired_buttons()
 
@@ -753,7 +727,6 @@ class ParticipantsView(discord.ui.View):
         self.total_pages = total_pages
         self.original_view = original_view
         
-        # Disable navigation buttons when appropriate
         self.prev_button.disabled = current_page == 0
         self.next_button.disabled = current_page >= total_pages - 1
         
@@ -770,14 +743,11 @@ class ParticipantsView(discord.ui.View):
     
     @discord.ui.button(label="Back", style=discord.ButtonStyle.blurple)
     async def back_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        """Return to the original giveaway view"""
         if self.original_view and hasattr(self.original_view, 'message'):
-            # Edit the original message instead of creating new one
             embed = create_giveaway_embed(self.giveaway)
             await self.original_view.message.edit(embed=embed, view=self.original_view)
-            await interaction.response.defer()  # Acknowledge the interaction
+            await interaction.response.defer()
         else:
-            # Fallback if something went wrong
             embed = create_giveaway_embed(self.giveaway)
             view = GiveawayView(self.giveaway)
             view.disable_expired_buttons()
@@ -790,21 +760,18 @@ class ParticipantsView(discord.ui.View):
             await self.update_view(interaction)
     
     async def update_view(self, interaction: discord.Interaction):
-        """Update the message with the new page"""
         embed = GiveawayView(self.giveaway).create_participants_embed(
             self.participants,
             self.current_page,
             self.total_pages
         )
         
-        # Update button states
         self.prev_button.disabled = self.current_page == 0
         self.next_button.disabled = self.current_page >= self.total_pages - 1
         
         await interaction.response.edit_message(embed=embed, view=self)
     
     async def on_timeout(self):
-        """Disable all buttons when view times out"""
         for item in self.children:
             item.disabled = True
         try:
@@ -813,6 +780,9 @@ class ParticipantsView(discord.ui.View):
         except discord.NotFound:
             pass
 
+# ============================================================
+# SHARED UI / HELPERS
+# ============================================================
 
 class ConfirmView(View):
     def __init__(self):
@@ -830,6 +800,10 @@ class ConfirmView(View):
         await interaction.response.defer()
         self.value = False
         self.stop()
+
+# ============================================================
+# GARDEN SYSTEM — classes & logic kept but commands disabled
+# ============================================================
 
 class InventoryView(View):
     def __init__(self, user_id):
@@ -898,7 +872,6 @@ class InventorySelect(Select):
             ]
             embed = discord.Embed(title="🧪 Fertilizers", description='\n'.join(ferts) or "None", color=discord.Color.blue())
         
-        # Keep the view active with the current selection
         view = InventoryView(interaction.user.id)
         await interaction.response.edit_message(embed=embed, view=view)
 
@@ -919,7 +892,6 @@ class SeedSelect(Select):
         
         options = []
         
-        # Add regular seeds
         for seed in regular_seeds:
             cost, quest = seeds[seed]
             rarity = SEED_RARITIES.get(seed, "Unknown")
@@ -929,7 +901,6 @@ class SeedSelect(Select):
                 value=f"seed_{seed}"
             ))
         
-        # Add limited seeds
         for name, data in limited_seeds.items():
             time_left = max(0, int((data["expires"] - time.time()) // 60))
             options.append(discord.SelectOption(
@@ -938,7 +909,6 @@ class SeedSelect(Select):
                 value=f"limited_{name}"
             ))
         
-        # Add fertilizers
         for name, data in fertilizers.items():
             options.append(discord.SelectOption(
                 label=f"🧪 {name} - {data['cost']} sheckles",
@@ -955,8 +925,6 @@ class SeedSelect(Select):
     
     async def callback(self, interaction: discord.Interaction):
         value = self.values[0]
-        
-        # Defer the response first to prevent timeout
         await interaction.response.defer(ephemeral=True)
         
         try:
@@ -967,7 +935,6 @@ class SeedSelect(Select):
             elif value.startswith("fert_"):
                 await self.handle_fertilizer_purchase(interaction, value[5:])
             
-            # Get the original message to edit the view
             message = await interaction.original_response()
             view = SeedShopView(self.regular_seeds, self.limited_seeds, self.fertilizers)
             await message.edit(view=view)
@@ -1000,21 +967,9 @@ class SeedSelect(Select):
         if user_sheckles.get(user_id, 0) < sheckles_required:
             return await interaction.followup.send("❌ Not enough sheckles!", ephemeral=True)
     
-        # Deduct sheckles
         user_sheckles[user_id] -= sheckles_required
-        
-        # Calculate grow time
         grow_time = calculate_grow_time(seed_name, user_id)
-        
-        # Create seed object
-        seed_obj = GrowingSeed(
-            seed_name,
-            grow_time,
-            limited=is_limited,
-            allowed_mutations=allowed_mutations
-        )
-        
-        # Add to inventory
+        seed_obj = GrowingSeed(seed_name, grow_time, limited=is_limited, allowed_mutations=allowed_mutations)
         user_inventory[user_id]["growing"].append(seed_obj)
     
         new_achievements = check_achievements(user_id)
@@ -1069,13 +1024,12 @@ class ShovelConfirmView(discord.ui.View):
 class GrowingSeed:
     def __init__(self, name, grow_duration, mutation=None, limited=False, allowed_mutations=None):
         self.name = name
-        self.finish_time = time.time() + grow_duration  # Use grow_duration to clarify
+        self.finish_time = time.time() + grow_duration
         self.limited = limited
         self.mutation = mutation or self.determine_mutation(name, allowed_mutations)
 
     def determine_mutation(self, plant_name, allowed_mutations=None):
         if allowed_mutations is not None:
-            # Only consider allowed mutations (either global or specific to this plant)
             pool = []
             for mut in allowed_mutations:
                 if mut in mutations["global"]:
@@ -1088,7 +1042,6 @@ class GrowingSeed:
                     return mut
             return None
 
-        # Normal mutation logic if no restriction
         if plant_name in mutations["specific"]:
             for mut, data in mutations["specific"][plant_name].items():
                 if data.get("priority", False) and random.random() < data["rarity"]:
@@ -1104,41 +1057,35 @@ class GrowingSeed:
         return None
 
 def calculate_grow_time(base_seed, user_id):
-    """Calculate grow time with all modifiers"""
-    # Base grow times (in seconds) - need to be defined
     BASE_GROW_TIMES = {
-        "Carrot": 300,      # 5 minutes
-        "Strawberry": 300,  # 5 minutes
-        "Potato": 300,      # 5 minutes
-        "Bamboo": 300,      # 5 minutes
-        "Ember Lily": 300,  # 5 minutes
-        "Sugar Apple": 300, # 5 minutes
-        "Beanstalk": 300   # 5 minutes
+        "Carrot": 300,
+        "Strawberry": 300,
+        "Potato": 300,
+        "Bamboo": 300,
+        "Ember Lily": 300,
+        "Sugar Apple": 300,
+        "Beanstalk": 300
     }
     
-    grow_time = BASE_GROW_TIMES.get(base_seed, 300)  # Default to 5 minutes
+    grow_time = BASE_GROW_TIMES.get(base_seed, 300)
     
-    # Season boost
     if base_seed in current_season["boosted_seeds"]:
-        grow_time *= 0.8  # 20% faster
+        grow_time *= 0.8
     
-    # Plant event modifier
     if current_plant_event:
         if current_plant_event["effect"] == "delay":
             grow_time += current_plant_event["delay"]
         elif current_plant_event["effect"] == "speed":
             grow_time *= current_plant_event["multiplier"]
     
-    # Fertilizer effects (would check user's active boosts)
     if user_active_boosts.get(user_id, {}).get("growth_boost"):
         boost = user_active_boosts[user_id]["growth_boost"]
         if time.time() < boost["expires"]:
             grow_time *= boost["multiplier"]
     
-    return max(30, grow_time)  # Ensure minimum 30 second grow time
+    return max(30, grow_time)
 
 def check_achievements(user_id):
-    """Check for new achievement unlocks"""
     new_achievements = []
     for name, data in achievement_definitions.items():
         if name not in user_achievements[user_id] and data["condition"](user_id):
@@ -1149,6 +1096,69 @@ def check_achievements(user_id):
 def has_admin_role(member):
     return any(role.id in ADMIN_ROLE_IDS for role in member.roles)
 
+def pretty_seed(seed_obj):
+    name = f"{seed_obj.name}"
+    if seed_obj.mutation:
+        name += f" ({seed_obj.mutation})"
+    if getattr(seed_obj, "limited", False):
+        name += " 🌟(Limited)"
+    return name
+
+def normalize_seed_name(raw: str):
+    raw = raw.strip()
+    m = re.match(r'^(.*?)(?:\((.*?)\))?$', raw)
+    base = ' '.join(word.capitalize() for word in m.group(1).split()).strip()
+    mut  = m.group(2)
+    if mut:
+        mut = ' '.join(word.capitalize() for word in mut.split()).strip()
+        combined = f"{base} ({mut})"
+    else:
+        combined = base
+    return base, mut, combined
+
+def find_matching_seed(seed_list, desired_input):
+    base, mut, _ = normalize_seed_name(desired_input)
+    for s in seed_list:
+        if s.name != base:
+            continue
+        if mut is None or (s.mutation and s.mutation.lower() == mut.lower()):
+            return s
+    return None
+
+def remove_trade_offer(sender_id, recipient_id, sender_seed_name, recipient_seed_name):
+    trade_offers[recipient_id] = [
+        offer for offer in trade_offers[recipient_id]
+        if not (
+            offer["sender_id"] == sender_id and
+            offer["sender_seed_name"] == sender_seed_name and
+            offer["recipient_seed_name"] == recipient_seed_name
+        )
+    ]
+
+async def safe_send_ephemeral(interaction, message):
+    try:
+        if not interaction.response.is_done():
+            await interaction.response.send_message(message, ephemeral=True)
+        else:
+            await interaction.followup.send(message, ephemeral=True)
+    except discord.NotFound:
+        pass
+
+def update_growing_seeds(user_id):
+    current_time = time.time()
+    growing = user_inventory[user_id]["growing"]
+    grown = user_inventory[user_id]["grown"]
+    
+    finished_seeds = [seed for seed in growing if seed.finish_time <= current_time]
+    for seed in finished_seeds:
+        grown.append(seed)
+    
+    user_inventory[user_id]["growing"] = [seed for seed in growing if seed.finish_time > current_time]
+
+# ============================================================
+# BOT EVENTS
+# ============================================================
+
 @bot.event
 async def on_ready():
     print(f"Logged in as {bot.user} (ID: {bot.user.id})")
@@ -1156,10 +1166,12 @@ async def on_ready():
         if hasattr(giveaway, 'view') and giveaway.view:
             bot.add_view(giveaway.view, message_id=giveaway.view.message.id)
     bot.add_view(CloseTicketView(bot))
-    refresh_stock.start()
 
-    rotate_seasons.start()
-    check_plant_events.start()
+    # Garden background tasks are disabled — uncomment to re-enable:
+    # refresh_stock.start()
+    # rotate_seasons.start()
+    # check_plant_events.start()
+
     cleanup_expired.start()
     
     try:
@@ -1169,12 +1181,14 @@ async def on_ready():
     except Exception as e:
         print(f"Failed to sync: {e}")
 
+# ============================================================
+# GIVEAWAY COMMANDS
+# ============================================================
+
 async def end_giveaway(giveaway):
-    # Cancel any scheduled tasks first
     if giveaway.task:
         giveaway.task.cancel()
 
-    # Disable the giveaway view buttons if it exists
     if hasattr(giveaway, 'view') and giveaway.view:
         for item in giveaway.view.children:
             item.disabled = True
@@ -1183,9 +1197,8 @@ async def end_giveaway(giveaway):
                 giveaway.view.disable_expired_buttons()
                 await giveaway.view.message.edit(view=giveaway.view)
         except discord.NotFound:
-            pass  # Message was already deleted
+            pass
 
-    # Notify winners
     for winner in giveaway.winners:
         try:
             await winner.send(
@@ -1200,9 +1213,8 @@ async def end_giveaway(giveaway):
                     f"Please contact {giveaway.hoster.mention} to claim your prize."
                 )
             except:
-                pass  # Fallback if we can't notify in channel either
+                pass
 
-    # Create results embed
     winners_text = ", ".join(w.mention for w in giveaway.winners) if giveaway.winners else "No winners"
     embed = discord.Embed(
         title="🎉 Giveaway Ended",
@@ -1215,7 +1227,6 @@ async def end_giveaway(giveaway):
         color=discord.Color.green()
     )
 
-    # Send results and clean up
     try:
         await giveaway.channel.send(embed=embed)
         await giveaway.channel.set_permissions(
@@ -1224,13 +1235,11 @@ async def end_giveaway(giveaway):
         )
         await giveaway.channel.edit(slowmode_delay=0)
     except discord.Forbidden:
-        pass  # Missing permissions - we tried our best
+        pass
 
-    # Remove from active giveaways
     if giveaway.channel.id in active_giveaways:
         active_giveaways.pop(giveaway.channel.id)
 
-    # Optional: Log the giveaway results
     giveaway_logs.append({
         'channel_id': giveaway.channel.id,
         'hoster_id': giveaway.hoster.id,
@@ -1238,61 +1247,6 @@ async def end_giveaway(giveaway):
         'winners': [w.id for w in giveaway.winners],
         'end_time': time.time()
     })
-
-@tree.command(name="add_limited_seed")
-@auto_defer(ephemeral=True)
-@app_commands.describe(
-    name="Seed name",
-    sheckles="Sheckle cost",
-    quest_value="Quest value",
-    duration_minutes="How long it's available",
-    mutations="Optional comma-separated list of possible mutations (leave blank to allow all)"
-)
-async def add_limited_seed(
-    interaction: discord.Interaction,
-    name: str,
-    sheckles: int,
-    quest_value: int,
-    duration_minutes: int,
-    mutations: str = ""
-):
-    if not has_admin_role(interaction.user):
-        return await interaction.followup.send("❌ Not allowed", ephemeral=True)
-
-    normalized_name, _, _ = normalize_seed_name(name)
-
-    # If mutations is blank, allow all mutations (None = unrestricted)
-    if not mutations.strip():
-        mutation_list = None
-    else:
-        # Parse and validate mutations
-        mutation_list = [m.strip().title() for m in mutations.split(",") if m.strip()]
-        
-        # Get valid mutations
-        valid_mutations = list(mutations_global := mutations["global"].keys())
-        if normalized_name in mutations["specific"]:
-            valid_mutations += mutations["specific"][normalized_name].keys()
-
-        # Check if any are invalid
-        invalid = [m for m in mutation_list if m not in valid_mutations]
-        if invalid:
-            return await interaction.followup.send(
-                f"❌ Invalid mutation(s): {', '.join(invalid)}", ephemeral=True
-            )
-
-    # Save to limited_seeds
-    limited_seeds[normalized_name] = {
-        "sheckles": sheckles,
-        "quest": quest_value,
-        "expires": time.time() + (duration_minutes * 60),
-        "mutations": mutation_list  # None = allow all, list = restricted
-    }
-
-    mut_display = "All mutations allowed" if mutation_list is None else ", ".join(mutation_list)
-    await interaction.followup.send(
-        f"✅ Limited seed **{normalized_name}** added for {duration_minutes} minutes.\n"
-        f"🔁 Mutations: {mut_display}"
-    )
 
 async def start_giveaway(interaction: discord.Interaction, winners: int, prize: str, number_range: str, hoster: discord.Member, duration: int = 0, target: Optional[int] = None):
     if not interaction.response.is_done():
@@ -1337,6 +1291,98 @@ async def schedule_giveaway_end(giveaway):
     if giveaway.channel.id in active_giveaways:
         await end_giveaway(giveaway)
 
+@tree.command(name="giveaway", description="Start a number guessing giveaway")
+@app_commands.describe(
+    prize="Prize for the giveaway",
+    author="User hosting the giveaway",
+    number_range="Range for guessing (e.g. 1-100)",
+    duration="How long the giveaway lasts (e.g. 1m, 30s, 2h)",
+    winners="Number of winners needed (default: 1)",
+    target="Optional target user"
+)
+@app_commands.checks.has_any_role(*ADMIN_ROLE_IDS)
+async def giveaway(
+    interaction: discord.Interaction,
+    prize: str,
+    author: discord.User,
+    number_range: str,
+    duration: str,
+    winners: Optional[int] = 1,
+    target: Optional[discord.User] = None
+):
+    if interaction.channel.id != 1363495611995001013:
+        await interaction.response.send_message("This command can only be used in the giveaway channel.", ephemeral=True)
+        return
+
+    if winners < 1:
+        await interaction.response.send_message("❌ Number of winners must be at least 1.", ephemeral=True)
+        return
+
+    try:
+        start, end = map(int, number_range.split("-"))
+        if start >= end:
+            raise ValueError
+    except:
+        await interaction.response.send_message("❌ Invalid number range. Use a format like `1-100`.", ephemeral=True)
+        return
+
+    time_units = {"s": 1, "m": 60, "h": 3600}
+    try:
+        time_unit = duration[-1]
+        time_value = int(duration[:-1])
+        duration_seconds = time_value * time_units[time_unit]
+        duration_minutes = duration_seconds // 60
+    except:
+        await interaction.response.send_message("❌ Invalid duration. Use `30s`, `1m`, `2h` etc.", ephemeral=True)
+        return
+
+    target_number = random.randint(start, end)
+
+    giveaway = Giveaway(
+        hoster=author,
+        prize=prize,
+        winners=winners,
+        number_range=(start, end),
+        target=target_number,
+        duration=duration_minutes,
+        channel=interaction.channel
+    )
+    
+    active_giveaways[interaction.channel.id] = giveaway
+
+    await interaction.channel.set_permissions(interaction.guild.default_role, send_messages=True)
+    await interaction.channel.edit(slowmode_delay=2)
+
+    embed = discord.Embed(
+        title="🎁 NUMBER GUESS GIVEAWAY",
+        description=(
+            f"**Host:** {author.mention}\n"
+            f"**Range:** {number_range}\n"
+            f"**Prize:** {prize}\n"
+            f"**Winners Needed:** {winners}\n"
+            f"**Duration:** {duration}\n\n"
+            "Click the button below to enter your guess!"
+        ),
+        color=discord.Color.gold()
+    )
+
+    if target:
+        embed.add_field(name="🎯 Target Player", value=target.mention)
+
+    view = GiveawayView(giveaway)
+    
+    if interaction.response.is_done():
+        message = await interaction.followup.send(embed=embed, view=view)
+    else:
+        await interaction.response.send_message(embed=embed, view=view)
+        message = await interaction.original_response()
+    
+    view.message = message
+    giveaway.view = view
+
+    if duration_minutes > 0:
+        giveaway.task = asyncio.create_task(schedule_giveaway_end(giveaway))
+
 @tree.command(name="stop_giveaway")
 @auto_defer(ephemeral=True)
 async def stop_giveaway(interaction: discord.Interaction):
@@ -1346,20 +1392,17 @@ async def stop_giveaway(interaction: discord.Interaction):
     if not giveaway:
         return await interaction.followup.send("❌ No active giveaway in this channel!", ephemeral=True)
     
-    # Check permissions - host or admin can stop
     if interaction.user.id != giveaway.hoster.id and not has_admin_role(interaction.user):
         return await interaction.followup.send(
             "❌ Only the giveaway host or admins can stop this!",
             ephemeral=True
         )
     
-    # Build results embed
     embed = discord.Embed(
         title="🎉 Giveaway Ended by Admin",
         color=discord.Color.orange()
     )
     
-    # Add basic info
     embed.add_field(
         name="Giveaway Details",
         value=(
@@ -1371,7 +1414,6 @@ async def stop_giveaway(interaction: discord.Interaction):
         inline=False
     )
     
-    # Add winners if any
     if giveaway.winners:
         winners_text = ", ".join(winner.mention for winner in giveaway.winners)
         embed.add_field(
@@ -1386,24 +1428,19 @@ async def stop_giveaway(interaction: discord.Interaction):
             inline=False
         )
     
-    # Cancel the scheduled end task if it exists
     if giveaway.task:
         giveaway.task.cancel()
     
-    # Clean up channel permissions
     await interaction.channel.set_permissions(
         interaction.guild.default_role,
         send_messages=False
     )
     await interaction.channel.edit(slowmode_delay=0)
     
-    # Remove from active giveaways
     active_giveaways.pop(interaction.channel.id, None)
     
-    # Send the results
     await interaction.followup.send(embed=embed)
     
-    # DM the host with full results
     try:
         host_embed = discord.Embed(
             title="🎁 Giveaway Stopped",
@@ -1419,242 +1456,11 @@ async def stop_giveaway(interaction: discord.Interaction):
         )
         await giveaway.hoster.send(embed=host_embed)
     except discord.Forbidden:
-        pass  # Host has DMs disabled
-        
-        
-        
-@tree.command(name="inventory")
-@auto_defer(ephemeral=True)
-async def inventory(interaction: discord.Interaction):
-    try:
-        """View your inventory with interactive controls"""
-        update_growing_seeds(interaction.user.id)
-        new_achievements = check_achievements(interaction.user.id)
-        
-        inv = user_inventory[interaction.user.id]
-        grown_list = [pretty_seed(seed) for seed in inv["grown"]]
-        growing_list = [
-            f"{pretty_seed(seed)} [{max(0, int(seed.finish_time - time.time()))}s]" 
-            for seed in inv["growing"]
-        ]
-        
-        embed = discord.Embed(title="🌱 Your Garden", color=discord.Color.green())
-        embed.add_field(name="🌾 Growing", value='\n'.join(growing_list) or "None", inline=False)
-        embed.add_field(name="🥕 Grown", value='\n'.join(grown_list) or "None", inline=False)
-        embed.add_field(name="💰 Sheckles", value=str(user_sheckles.get(interaction.user.id, 0)), inline=False)
-        
-        if new_achievements:
-            embed.set_footer(text=f"🎉 New achievements: {', '.join(new_achievements)}")
-        
-        view = InventoryView(interaction.user.id)
-        await interaction.edit_original_response(embed=embed, view=view)
-    except Exception as e:
-        print(f"Error in inventory command: {e}")
-        try:
-            await interaction.followup.send("❌ An error occurred while loading your inventory.", ephemeral=True)
-        except:
-            pass  # If we can't even send an error message
-
-@tree.command(name="sheckles")
-async def check_sheckles(interaction: discord.Interaction):
-    sheckles = user_sheckles.get(interaction.user.id, 0)
-    await interaction.followup.send(f"💰 You have {sheckles} sheckles.")
-
-@tree.command(name="closest_quest")
-@auto_defer(ephemeral=True)
-async def closest_quest(interaction: discord.Interaction):
-    count = user_message_counts[interaction.user.id]
-    closest = None
-    diff = float('inf')
-    for name, (sheck, quest) in seeds.items():
-        if quest > 0 and (quest - count) < diff and count < quest:
-            closest = (name, quest - count)
-            diff = quest - count
-    msg = f"Closest quest seed: {closest[0]} ({closest[1]} messages left)" if closest else "You have completed all quests!"
-    await interaction.followup.send(msg)
-
-@tree.command(name="give_seed")
-@auto_defer(ephemeral=True)
-@app_commands.describe(user="User to give seed to", seed="Seed name")
-async def give_seed(interaction: discord.Interaction, user: discord.Member, seed: str):
-    if not has_admin_role(interaction.user):
-        return await interaction.followup.send("❌ Not allowed", ephemeral=True)
-
-    base, mut, seed = normalize_seed_name(seed)
-
-    if base not in seeds and base not in limited_seeds:
-        return await interaction.followup.send("❌ Invalid seed name.", ephemeral=True)
-
-    # Calculate grow time with modifiers
-    grow_time = calculate_grow_time(base, interaction.user.id)
-    
-    # Handle mutations and boosts
-    allowed_mutations = None
-    if base in limited_seeds:
-        allowed_mutations = limited_seeds[base].get("mutations")
-
-    # Check for active mutation boost
-    if user_active_boosts.get(interaction.user.id, {}).get("mutation_boost"):
-        if time.time() < user_active_boosts[interaction.user.id]["mutation_boost"]["expires"]:
-            # This will be handled in the GrowingSeed class automatically
-            pass
-    
-    seed_obj = GrowingSeed(
-        base, 
-        grow_time, 
-        limited=base in limited_seeds,
-        allowed_mutations=allowed_mutations
-    )
-    
-    user_inventory[user.id]["growing"].append(seed_obj)
-    await interaction.followup.send(f"✅ Gave {pretty_seed(seed_obj)} to {user.mention}")
-
-@tree.command(name="give_sheckles")
-@auto_defer(ephemeral=True)
-@app_commands.describe(user="User to give sheckles to", amount="Amount of sheckles")
-async def give_sheckles(interaction: discord.Interaction, user: discord.Member, amount: int):
-    if not has_admin_role(interaction.user):
-        return await interaction.followup.send("❌ Not allowed", ephemeral=True)
-    user_sheckles[user.id] += amount
-    await interaction.followup.send(f"✅ Gave {amount} sheckles to {user.mention}")
-
-@tree.command(name="buy_seed")
-@auto_defer(ephemeral=True)
-@app_commands.describe(seed="Seed name to purchase")
-async def buy_seed(interaction: discord.Interaction, seed: str):
-    base, mut, seed = normalize_seed_name(seed)
-
-    if base not in current_stock and base not in limited_seeds:
-        return await interaction.followup.send("❌ This seed is not in stock right now!", ephemeral=True)
-
-    if base in seeds:
-        sheckles_required, _ = seeds[base]
-        if sheckles_required <= 0:
-            return await interaction.followup.send("❌ This seed is not for sale.", ephemeral=True)
-
-        if user_sheckles.get(interaction.user.id, 0) < sheckles_required:
-            return await interaction.followup.send("❌ Not enough sheckles!", ephemeral=True)
-
-        grow_time = calculate_grow_time(base, interaction.user.id)
-        
-        allowed_mutations = None
-        if base in limited_seeds:
-            allowed_mutations = limited_seeds[base].get("mutations")
-
-        if user_active_boosts.get(interaction.user.id, {}).get("mutation_boost"):
-            if time.time() < user_active_boosts[interaction.user.id]["mutation_boost"]["expires"]:
-                pass
-        
-        user_sheckles[interaction.user.id] -= sheckles_required
-        seed_obj = GrowingSeed(
-            base,
-            grow_time,  # This is correctly passed as duration
-            allowed_mutations=allowed_mutations
-        )
-        user_inventory[interaction.user.id]["growing"].append(seed_obj)
-
-        new_achievements = check_achievements(interaction.user.id)
-        achievement_msg = f"\n🎉 New achievement(s): {', '.join(new_achievements)}" if new_achievements else ""
-
-        return await interaction.followup.send(
-            f"✅ Purchased {pretty_seed(seed_obj)} seed for {sheckles_required} sheckles! "
-            f"It will be ready in {int(grow_time)} seconds."
-            f"{achievement_msg}"
-        )
-
-    elif base in limited_seeds:
-        seed_data = limited_seeds[base]
-        if time.time() > seed_data["expires"]:
-            return await interaction.followup.send("❌ This limited seed is no longer available.", ephemeral=True)
-
-        sheckles_required = seed_data["sheckles"]
-        if user_sheckles.get(interaction.user.id, 0) < sheckles_required:
-            return await interaction.followup.send("❌ Not enough sheckles!", ephemeral=True)
-
-        # REMOVED THE QUEST CHECK HERE FOR CONSISTENCY
-        # (though you might want to keep it for direct commands)
-
-        grow_time = calculate_grow_time(base, interaction.user.id)
-        allowed_mutations = seed_data.get("mutations")
-        if user_active_boosts.get(interaction.user.id, {}).get("mutation_boost"):
-            if time.time() < user_active_boosts[interaction.user.id]["mutation_boost"]["expires"]:
-                pass
-
-        user_sheckles[interaction.user.id] -= sheckles_required
-        seed_obj = GrowingSeed(
-            base,
-            grow_time,
-            limited=True,
-            allowed_mutations=allowed_mutations
-        )
-        user_inventory[interaction.user.id]["growing"].append(seed_obj)
-
-        new_achievements = check_achievements(interaction.user.id)
-        achievement_msg = f"\n🎉 New achievement(s): {', '.join(new_achievements)}" if new_achievements else ""
-
-        return await interaction.followup.send(
-            f"✅ Purchased limited {pretty_seed(seed_obj)} seed for {sheckles_required} sheckles! "
-            f"It will be ready in {int(grow_time)} seconds."
-            f"{achievement_msg}"
-        )
-
-    else:
-        await interaction.followup.send(
-            "❌ Seed not found in shop. Use `/shoplist` to see available seeds.", ephemeral=True
-        )
-
-def pretty_seed(seed_obj):
-    name = f"{seed_obj.name}"
-    if seed_obj.mutation:
-        name += f" ({seed_obj.mutation})"
-    if getattr(seed_obj, "limited", False):
-        name += " 🌟(Limited)"
-    return name
-
-def normalize_seed_name(raw: str):
-    """
-    Turns 'ember lily (inferno)' → 'Ember Lily (Inferno)'
-    Returns (seed_name, mutation_or_None, combined_string)
-    """
-    raw = raw.strip()
-    m = re.match(r'^(.*?)(?:\((.*?)\))?$', raw)
-    base = ' '.join(word.capitalize() for word in m.group(1).split()).strip()
-    mut  = m.group(2)
-    if mut:
-        mut = ' '.join(word.capitalize() for word in mut.split()).strip()
-        combined = f"{base} ({mut})"
-    else:
-        combined = base
-    return base, mut, combined
-
-def find_matching_seed(seed_list, desired_input):
-    base, mut, _ = normalize_seed_name(desired_input)
-    for s in seed_list:
-        if s.name != base:
-            continue
-        if mut is None or (s.mutation and s.mutation.lower() == mut.lower()):
-            return s
-    return None
-
-def remove_trade_offer(sender_id, recipient_id, sender_seed_name, recipient_seed_name):
-    """Safely remove a specific trade offer from the recipient's queue"""
-    trade_offers[recipient_id] = [
-        offer for offer in trade_offers[recipient_id]
-        if not (
-            offer["sender_id"] == sender_id and
-            offer["sender_seed_name"] == sender_seed_name and
-            offer["recipient_seed_name"] == recipient_seed_name
-        )
-    ]
-
-async def safe_send_ephemeral(interaction, message):
-    try:
-        if not interaction.response.is_done():
-            await interaction.response.send_message(message, ephemeral=True)
-        else:
-            await interaction.followup.send(message, ephemeral=True)
-    except discord.NotFound:
         pass
+
+# ============================================================
+# TRADING COMMANDS
+# ============================================================
 
 @tree.command(name="trade_offer")
 @auto_defer(ephemeral=False)
@@ -1674,7 +1480,6 @@ async def trade_offer(interaction: discord.Interaction, user: discord.Member, yo
     if not recipient_seed_obj:
         return await interaction.followup.send(f"❌ {user.mention} doesn't have that seed or it's still growing.", ephemeral=True)
 
-    # Create the embed first
     embed = discord.Embed(
         title="🔔 Trade Offer",
         description=(
@@ -1686,20 +1491,16 @@ async def trade_offer(interaction: discord.Interaction, user: discord.Member, yo
     )
     embed.set_footer(text="This trade offer will expire in 5 minutes")
 
-    # Create the view
     view = TradeView(interaction.user, user, sender_seed_obj, recipient_seed_obj)
 
-    # Send the message
     msg = await interaction.channel.send(
         f"{user.mention}, you received a trade offer from {interaction.user.mention}!",
         embed=embed,
         view=view
     )
 
-    # Now update the view with the message reference
     view.original_message = msg
 
-    # Store the trade offer with the message ID
     trade_offers[recipient_id].append({
         "sender_id": sender_id,
         "sender_seed_name": sender_seed_obj.name,
@@ -1708,7 +1509,7 @@ async def trade_offer(interaction: discord.Interaction, user: discord.Member, yo
         "recipient_seed_mut": recipient_seed_obj.mutation,
         "timestamp": time.time(),
         "original_message_id": msg.id,
-        "trade_messages": [msg.id]  # Initialize with this message
+        "trade_messages": [msg.id]
     })
 
     try:
@@ -1719,13 +1520,12 @@ async def trade_offer(interaction: discord.Interaction, user: discord.Member, yo
             f"Check {interaction.channel.mention} to respond!"
         )
     except discord.Forbidden:
-        pass  # user has DMs disabled
+        pass
 
 
 @tree.command(name="trade_offers")
 @auto_defer(ephemeral=True)
 async def view_trade_offers(interaction: discord.Interaction):
-    # Normalize bad old data just in case
     user_id = interaction.user.id
     if isinstance(trade_offers.get(user_id), dict):
         trade_offers[user_id] = [trade_offers[user_id]]
@@ -1738,7 +1538,6 @@ async def view_trade_offers(interaction: discord.Interaction):
     if not offers:
         return await interaction.followup.send("📭 You have no pending trade offers.", ephemeral=True)
 
-    # Remove expired offers
     now = time.time()
     trade_offers[user_id] = [offer for offer in offers if now - offer["timestamp"] <= 300]
 
@@ -1763,7 +1562,7 @@ async def view_trade_offers(interaction: discord.Interaction):
             )
 
             if not sender_seed or not recipient_seed:
-                continue  # skip invalid trades
+                continue
 
             embed = discord.Embed(
                 title=f"🔁 Trade Offer from {sender.display_name}",
@@ -1775,7 +1574,6 @@ async def view_trade_offers(interaction: discord.Interaction):
                 color=discord.Color.blurple()
             )
 
-            # Get original message if it exists
             original_message = None
             if "original_message_id" in offer:
                 try:
@@ -1783,7 +1581,6 @@ async def view_trade_offers(interaction: discord.Interaction):
                 except:
                     pass
 
-            # Create view with all message references
             view = TradeView(
                 sender=sender,
                 recipient=interaction.user,
@@ -1794,10 +1591,8 @@ async def view_trade_offers(interaction: discord.Interaction):
                 trade_messages=offer.get("trade_messages", [])
             )
             
-            # Send the trade offer message
             trade_msg = await interaction.channel.send(embed=embed, view=view)
             
-            # Store this message ID in the trade's messages list
             if "trade_messages" not in offer:
                 offer["trade_messages"] = []
             offer["trade_messages"].append(trade_msg.id)
@@ -1833,164 +1628,60 @@ async def trade_logs_command(interaction: discord.Interaction):
         )
     await interaction.followup.send(embed=embed, ephemeral=True)
 
-@tree.command(name="shop")
+# ============================================================
+# MIDDLEMAN COMMAND
+# ============================================================
+
+@tree.command(name="apply_middleman", description="Apply for a middleman trade")
+async def apply_middleman(interaction: discord.Interaction):
+    blacklist_role = interaction.guild.get_role(1344056030153146448)
+    if blacklist_role and blacklist_role in interaction.user.roles:
+        return await interaction.response.send_message(
+            "🚫 You are blacklisted from using the middleman system.",
+            ephemeral=True
+        )
+
+    await interaction.response.send_modal(MiddlemanModal(bot, interaction))
+
+# ============================================================
+# ADMIN COMMANDS (kept for garden management if re-enabled)
+# ============================================================
+
+@tree.command(name="give_seed")
 @auto_defer(ephemeral=True)
-async def shoplist(interaction: discord.Interaction):
-    """View the seed shop with interactive menu"""
-    # Purge expired limited seeds
-    global limited_seeds
-    limited_seeds = {
-        name: data for name, data in limited_seeds.items()
-        if time.time() < data["expires"] and data["sheckles"] > 0
-    }
-
-    embed = discord.Embed(title="🛒 Seed Shop", color=discord.Color.purple())
-    embed.add_field(
-        name="🌦 Current Season",
-        value=f"{current_season['name']} (Boosted: {', '.join(current_season['boosted_seeds'])})",
-        inline=False
-    )
-    
-    # Send the view with dropdown - pass limited_seeds directly (it's already a dict)
-    view = SeedShopView(current_stock, limited_seeds, fertilizers)
-    await interaction.edit_original_response(embed=embed, view=view)
-
-@tree.command(name="sell_seed")
-@auto_defer(ephemeral=True)
-@app_commands.describe(seed="Seed name", seed_type="Seed state")
-@app_commands.choices(seed_type=[
-    app_commands.Choice(name="Growing", value="growing"),
-    app_commands.Choice(name="Grown", value="grown")
-])
-async def sell_seed(interaction: discord.Interaction, seed: str, seed_type: app_commands.Choice[str]):
-    update_growing_seeds(interaction.user.id)
-    
-    # Normalize input (handles "test (limited)" -> "Test (Limited)")
-    base, mut, _ = normalize_seed_name(seed)
-    inv = user_inventory[interaction.user.id]
-    
-    # Dynamic base prices (combine regular + limited seeds)
-    base_prices = {
-        "Carrot": 2,
-        "Strawberry": 10,
-        "Potato": 5,
-        "Bamboo": 20,
-        "Ember Lily": 55,
-        "Sugar Apple": 80,
-        "Beanstalk": 70,
-    }
-    
-    # Add active limited seeds to pricing
-    for seed_name, data in limited_seeds.items():
-        if time.time() < data["expires"]:  # Only if not expired
-            base_prices[seed_name] = data["sheckles"]  # Use limited seed's sheckle cost as base
-    
-    # Find seed in inventory
-    seed_list = []
-    if seed_type.value == "growing":
-        seed_list = [s for s in inv["growing"] if s.name.lower() == base.lower()]
-    else:
-        seed_list = [s for s in inv["grown"] if s.name.lower() == base.lower()]
-    
-    if not seed_list or base not in base_prices:
-        return await interaction.followup.send("❌ Invalid seed or type", ephemeral=True)
-    
-    # Calculate price with mutation
-    base_price = base_prices[base]
-    mult = 1.0
-    if seed_list[0].mutation:
-        mut = seed_list[0].mutation
-        if base in mutations["specific"] and mut in mutations["specific"][base]:
-            mult = mutations["specific"][base][mut]["multiplier"]
-        elif mut in mutations["global"]:
-            mult = mutations["global"][mut]["multiplier"]
-    
-    price = int(base_price * mult)
-    if seed_type.value == "growing":
-        price = price // 2  # Half price for growing
-    
-    # Complete sale
-    if seed_type.value == "growing":
-        inv["growing"].remove(seed_list[0])
-    else:
-        inv["grown"].remove(seed_list[0])
-    
-    user_sheckles[interaction.user.id] += price
-    
-    msg = f"✅ Sold {seed_list[0].name}"
-    if seed_list[0].mutation:
-        msg += f" ({seed_list[0].mutation})"
-    if getattr(seed_list[0], "limited", False):
-        msg += " 🌟(Limited)"
-    msg += f" for {price} sheckles!"
-    
-    await interaction.followup.send(msg, ephemeral=True)
-
-
-def update_growing_seeds(user_id):
-    """Move finished growing seeds to grown inventory"""
-    current_time = time.time()
-    print(f"Current time: {current_time}")  # Debug print
-    
-    growing = user_inventory[user_id]["growing"]
-    grown = user_inventory[user_id]["grown"]
-    
-    # Debug print all growing seeds
-    print("Growing seeds before update:")
-    for seed in growing:
-        print(f"- {seed.name} finishes at {seed.finish_time} ({seed.finish_time - current_time}s remaining)")
-    
-    # Find all seeds that are done growing
-    finished_seeds = [seed for seed in growing if seed.finish_time <= current_time]
-    
-    if finished_seeds:
-        print(f"Moving {len(finished_seeds)} seeds to grown")
-    
-    # Move them to grown
-    for seed in finished_seeds:
-        grown.append(seed)
-    
-    # Remove them from growing
-    user_inventory[user_id]["growing"] = [seed for seed in growing if seed.finish_time > current_time]
-
-@tasks.loop(minutes=5)
-async def refresh_stock():
-    global current_stock, limited_seeds  # Add current_stock to globals
-    
-    # Clean expired limited seeds
-    limited_seeds = {
-        name: data for name, data in limited_seeds.items()
-        if time.time() < data["expires"]
-    }
-    
-    # Now modify the GLOBAL current_stock
-    current_stock = []  # ✅ This modifies the global variable
-    
-    # Rest of your stock refresh logic...
-    for seed, rarity in SEED_RARITIES.items():
-        if random.random() < RARITY_CHANCES[rarity]:
-            current_stock.append(seed)
-
-    # Ensure at least 2 common seeds are always present
-    commons = [s for s, r in SEED_RARITIES.items() if r == "Common"]
-    commons_in_stock = [s for s in current_stock if s in commons]
-    needed = max(2 - len(commons_in_stock), 0)
-
-    if needed > 0:
-        available_commons = list(set(commons) - set(commons_in_stock))
-        random.shuffle(available_commons)
-        current_stock += available_commons[:needed]
-
-    # Optional: shuffle stock list
-    random.shuffle(current_stock)
-
-@tree.command(name="refresh_stock")
-@auto_defer(ephemeral=True)
-async def manual_refresh(interaction: discord.Interaction):
+@app_commands.describe(user="User to give seed to", seed="Seed name")
+async def give_seed(interaction: discord.Interaction, user: discord.Member, seed: str):
     if not has_admin_role(interaction.user):
         return await interaction.followup.send("❌ Not allowed", ephemeral=True)
-    refresh_stock.restart()
-    await interaction.followup.send("🔁 Stock refreshed!", ephemeral=True)
+
+    base, mut, seed = normalize_seed_name(seed)
+
+    if base not in seeds and base not in limited_seeds:
+        return await interaction.followup.send("❌ Invalid seed name.", ephemeral=True)
+
+    grow_time = calculate_grow_time(base, interaction.user.id)
+    allowed_mutations = None
+    if base in limited_seeds:
+        allowed_mutations = limited_seeds[base].get("mutations")
+
+    seed_obj = GrowingSeed(
+        base, 
+        grow_time, 
+        limited=base in limited_seeds,
+        allowed_mutations=allowed_mutations
+    )
+    
+    user_inventory[user.id]["growing"].append(seed_obj)
+    await interaction.followup.send(f"✅ Gave {pretty_seed(seed_obj)} to {user.mention}")
+
+@tree.command(name="give_sheckles")
+@auto_defer(ephemeral=True)
+@app_commands.describe(user="User to give sheckles to", amount="Amount of sheckles")
+async def give_sheckles(interaction: discord.Interaction, user: discord.Member, amount: int):
+    if not has_admin_role(interaction.user):
+        return await interaction.followup.send("❌ Not allowed", ephemeral=True)
+    user_sheckles[user.id] += amount
+    await interaction.followup.send(f"✅ Gave {amount} sheckles to {user.mention}")
 
 @tree.command(name="growinstant")
 @auto_defer(ephemeral=True)
@@ -2008,12 +1699,11 @@ async def growinstant(interaction: discord.Interaction, user: discord.Member, pl
     if not match:
         return await interaction.followup.send(f"❌ No matching growing seed found for {user.mention}.", ephemeral=True)
 
-    # Preserve the limited status when moving to grown
     grown_seed = GrowingSeed(
         match.name,
-        0,  # Instant grow
+        0,
         mutation=match.mutation,
-        limited=getattr(match, "limited", False)  # <-- Preserve limited status
+        limited=getattr(match, "limited", False)
     )
     
     growing.remove(match)
@@ -2021,268 +1711,71 @@ async def growinstant(interaction: discord.Interaction, user: discord.Member, pl
 
     await interaction.followup.send(f"🌱 Instantly grew {pretty_seed(grown_seed)} for {user.mention}.", ephemeral=True)
 
-@tasks.loop(hours=24)
-async def rotate_seasons():
-    global current_season
-    current_idx = next((i for i, s in enumerate(SEASONS) if s["name"] == current_season["name"]), 0)
-    next_idx = (current_idx + 1) % len(SEASONS)
-    current_season = SEASONS[next_idx]
-    
-    # Announce season change
-    channel = bot.get_channel(YOUR_ANNOUNCEMENT_CHANNEL_ID)
-    if channel:
-        boosted = ", ".join(current_season["boosted_seeds"])
-        await channel.send(f"🌱 The season has changed to **{current_season['name']}**! Boosted seeds: {boosted}")
+# ============================================================
+# BACKGROUND TASKS
+# ============================================================
 
-@tasks.loop(minutes=30)
-async def check_plant_events():
-    global current_plant_event
-    
-    # Clear expired events
-    if current_plant_event and time.time() > current_plant_event["end_time"]:
-        current_plant_event = None
-    
-    # Random chance to start new event (5% chance per check)
-    if not current_plant_event and random.random() < 0.05:
-        event = random.choice(PLANT_EVENTS)
-        event["start_time"] = time.time()
-        event["end_time"] = time.time() + event["duration"]
-        current_plant_event = event
-        
-        # Announce event
-        channel = bot.get_channel(YOUR_ANNOUNCEMENT_CHANNEL_ID)
-        if channel:
-            desc = (f"All plants grow {event['multiplier']*100}% faster!" 
-                   if event["effect"] == "speed" 
-                   else f"All plants take {event['delay']//60} extra minutes to grow!")
-            await channel.send(
-                f"🌿 **PLANT EVENT: {event['name']}** 🌿\n"
-                f"{desc}\n"
-                f"Duration: {event['duration']//3600} hours"
-            )
-
-@tree.command(name="buy_fertilizer")
-@auto_defer(ephemeral=True)
-@app_commands.describe(fertilizer="Fertilizer name")
-async def buy_fertilizer(interaction: discord.Interaction, fertilizer: str):
-    fert = fertilizers.get(fertilizer.title())
-    if not fert:
-        return await interaction.followup.send("❌ Invalid fertilizer", ephemeral=True)
-    
-    if user_sheckles.get(interaction.user.id, 0) < fert["cost"]:
-        return await interaction.followup.send("❌ Not enough sheckles", ephemeral=True)
-    
-    user_sheckles[interaction.user.id] -= fert["cost"]
-    user_fertilizers[interaction.user.id][fertilizer.title()] += 1
-    
-    await interaction.followup.send(
-        f"✅ Purchased {fertilizer.title()} for {fert['cost']} sheckles! "
-        f"Use `/use_fertilizer {fertilizer.title()}` to activate it."
-    )
-
-
-@tree.command(name="use_fertilizer")
-@auto_defer(ephemeral=True)
-@app_commands.describe(fertilizer="Fertilizer name")
-async def use_fertilizer(interaction: discord.Interaction, fertilizer: str):
-    fert_name = fertilizer.title()
-    if user_fertilizers[interaction.user.id].get(fert_name, 0) < 1:
-        return await interaction.followup.send("❌ You don't have this fertilizer", ephemeral=True)
-    
-    fert = fertilizers[fert_name]
-    user_fertilizers[interaction.user.id][fert_name] -= 1
-    user_active_boosts[interaction.user.id][fert["effect"]["type"] + "_boost"] = {
-        "expires": time.time() + fert["effect"]["duration"],
-        "multiplier": fert["effect"]["multiplier"]
-    }
-    
-    await interaction.followup.send(
-        f"🌱 Activated {fert_name}! Effect will last for {fert['effect']['duration']//3600} hours."
-    )
-
-@tree.command(name="shovel")
-@auto_defer(ephemeral=True)
-@app_commands.describe(
-    plant="Plant to remove (name or 'all') - add 'x1', 'x2' etc. to remove specific amounts",
-    plant_type="Type of plant to remove",
-    force="Skip confirmation (admin only)"
-)
-@app_commands.choices(plant_type=[
-    app_commands.Choice(name="Growing", value="growing"),
-    app_commands.Choice(name="Grown", value="grown"),
-    app_commands.Choice(name="Both", value="both")
-])
-async def shovel(
-    interaction: discord.Interaction,
-    plant: Optional[str] = None,
-    plant_type: Optional[app_commands.Choice[str]] = None,
-    force: bool = False
-):
-    """Remove plants from your garden with confirmation"""
-    update_growing_seeds(interaction.user.id)
-    
-    if plant is None:
-        return await inventory(interaction)
-    
-    # Parse quantity if specified (e.g. "Carrot x2")
-    quantity = 0  # 0 means all
-    base_plant = plant
-    if "x" in plant.lower():
-        parts = plant.lower().split("x")
-        if len(parts) == 2 and parts[1].isdigit():
-            quantity = int(parts[1])
-            base_plant = parts[0].strip()
-    
-    base_name, mut, _ = normalize_seed_name(base_plant)
-    inv = user_inventory[interaction.user.id]
-    
-    # Find matching plants
-    matches = []
-    check_growing = plant_type is None or plant_type.value in ["growing", "both"]
-    check_grown = plant_type is None or plant_type.value in ["grown", "both"]
-    
-    if check_growing:
-        matches.extend([
-            p for p in inv["growing"]
-            if (base_name.lower() == "all" or p.name.lower() == base_name.lower()) and
-               (mut is None or (p.mutation and p.mutation.lower() == mut.lower()))
-        ])
-    
-    if check_grown:
-        matches.extend([
-            p for p in inv["grown"]
-            if (base_name.lower() == "all" or p.name.lower() == base_name.lower()) and
-               (mut is None or (p.mutation and p.mutation.lower() == mut.lower()))
-        ])
-    
-    if not matches:
-        return await interaction.followup.send(
-            f"❌ No matching plants found in your {'garden' if plant_type is None else plant_type.name.lower()}.",
-            ephemeral=True
-        )
-    
-    # Handle quantity
-    if quantity > 0:
-        if quantity > len(matches):
-            return await interaction.followup.send(
-                f"❌ You only have {len(matches)} of those plants!",
-                ephemeral=True
-            )
-        matches = matches[:quantity]  # Only remove the specified amount
-    
-    # Check for special plants needing confirmation
-    needs_confirmation = not (force and has_admin_role(interaction.user))
-
-    
-    if needs_confirmation:
-        limited_count = sum(1 for p in matches if getattr(p, "limited", False))
-        mutated_count = sum(1 for p in matches if p.mutation)
-        
-        embed = discord.Embed(
-            title="⚠️ Confirm Plant Removal",
-            color=discord.Color.orange()
-        )
-        embed.description = (
-            f"You're about to remove {len(matches)} plants:\n"
-            f"• {limited_count} limited edition 🌟\n"
-            f"• {mutated_count} mutated 🔄\n\n"
-            "**These cannot be recovered!**"
-        )
-        
-        view = ShovelConfirmView(base_name, plant_type.value if plant_type else "both", limited_count > 0, mutated_count > 0)
-        await interaction.followup.send(embed=embed, view=view, ephemeral=True)
-        await view.wait()
-        
-        if not view.confirmed:
-            return  # Already handled in the view
-    else:
-        if not interaction.response.is_done():
-            await interaction.response.defer(ephemeral=True)
-
-        
-    # Perform removal
-    removed = []
-    if check_growing:
-        to_remove = matches[:]  # Copy the matches we want to remove
-        inv["growing"] = [
-            p for p in inv["growing"]
-            if p not in to_remove
-        ]
-        removed.extend(to_remove)
-    
-    if check_grown:
-        to_remove = matches[:]  # Copy the matches we want to remove
-        inv["grown"] = [
-            p for p in inv["grown"]
-            if p not in to_remove
-        ]
-        removed.extend(to_remove)
-    
-    # Build result embed
-    embed = discord.Embed(
-        title="🪴 Shovel Results",
-        color=discord.Color.green()
-    )
-    
-    removed_counts = {
-        "normal": 0,
-        "mutated": 0,
-        "limited": 0
-    }
-    
-    for p in removed:
-        if getattr(p, "limited", False):
-            removed_counts["limited"] += 1
-        elif p.mutation:
-            removed_counts["mutated"] += 1
-        else:
-            removed_counts["normal"] += 1
-    
-    embed.add_field(
-        name="Removed Plants",
-        value=(
-            f"• {removed_counts['normal']} normal\n"
-            f"• {removed_counts['mutated']} mutated\n"
-            f"• {removed_counts['limited']} limited 🌟"
-        ),
-        inline=False
-    )
-    
-    if removed_counts["limited"] > 0 or removed_counts["mutated"] > 0:
-        embed.set_footer(text="⚠️ Limited and mutated plants cannot be recovered!")
-    
-    try:
-        # Use followup only if we deferred earlier
-        if needs_confirmation:
-            await interaction.followup.send(embed=embed, ephemeral=True)
-        else:
-            await interaction.followup.send(embed=embed, ephemeral=True)
-    except discord.errors.NotFound:
-        # Fallback if the interaction expired
-        try:
-            await interaction.user.send(embed=embed)
-        except:
-            pass  # If we can't DM, just silently fail
-
-@tree.command(name="apply_middleman", description="Apply for a middleman trade")
-async def apply_middleman(interaction: discord.Interaction):
-    blacklist_role = interaction.guild.get_role(1344056030153146448)
-    if blacklist_role and blacklist_role in interaction.user.roles:
-        return await interaction.response.send_message(
-            "🚫 You are blacklisted from using the middleman system.",
-            ephemeral=True
-        )
-
-    await interaction.response.send_modal(MiddlemanModal(bot, interaction))
+# Garden tasks — disabled, uncomment to re-enable:
+#
+# @tasks.loop(minutes=5)
+# async def refresh_stock():
+#     global current_stock, limited_seeds
+#     limited_seeds = {
+#         name: data for name, data in limited_seeds.items()
+#         if time.time() < data["expires"]
+#     }
+#     current_stock = []
+#     for seed, rarity in SEED_RARITIES.items():
+#         if random.random() < RARITY_CHANCES[rarity]:
+#             current_stock.append(seed)
+#     commons = [s for s, r in SEED_RARITIES.items() if r == "Common"]
+#     commons_in_stock = [s for s in current_stock if s in commons]
+#     needed = max(2 - len(commons_in_stock), 0)
+#     if needed > 0:
+#         available_commons = list(set(commons) - set(commons_in_stock))
+#         random.shuffle(available_commons)
+#         current_stock += available_commons[:needed]
+#     random.shuffle(current_stock)
+#
+# @tasks.loop(hours=24)
+# async def rotate_seasons():
+#     global current_season
+#     current_idx = next((i for i, s in enumerate(SEASONS) if s["name"] == current_season["name"]), 0)
+#     next_idx = (current_idx + 1) % len(SEASONS)
+#     current_season = SEASONS[next_idx]
+#     channel = bot.get_channel(YOUR_ANNOUNCEMENT_CHANNEL_ID)
+#     if channel:
+#         boosted = ", ".join(current_season["boosted_seeds"])
+#         await channel.send(f"🌱 The season has changed to **{current_season['name']}**! Boosted seeds: {boosted}")
+#
+# @tasks.loop(minutes=30)
+# async def check_plant_events():
+#     global current_plant_event
+#     if current_plant_event and time.time() > current_plant_event["end_time"]:
+#         current_plant_event = None
+#     if not current_plant_event and random.random() < 0.05:
+#         event = random.choice(PLANT_EVENTS)
+#         event["start_time"] = time.time()
+#         event["end_time"] = time.time() + event["duration"]
+#         current_plant_event = event
+#         channel = bot.get_channel(YOUR_ANNOUNCEMENT_CHANNEL_ID)
+#         if channel:
+#             desc = (f"All plants grow {event['multiplier']*100}% faster!"
+#                    if event["effect"] == "speed"
+#                    else f"All plants take {event['delay']//60} extra minutes to grow!")
+#             await channel.send(
+#                 f"🌿 **PLANT EVENT: {event['name']}** 🌿\n"
+#                 f"{desc}\n"
+#                 f"Duration: {event['duration']//3600} hours"
+#             )
 
 @tasks.loop(minutes=5)
 async def cleanup_expired():
     """Clean up expired trades and boosts"""
     current_time = time.time()
     
-    # Clean expired trades
     for user_id, offer in list(trade_offers.items()):
-        if current_time - offer["timestamp"] > 300:  # 5 minutes
+        if isinstance(offer, dict) and current_time - offer.get("timestamp", 0) > 300:
             trade_offers.pop(user_id)
             try:
                 sender = await bot.fetch_user(offer["sender_id"])
@@ -2291,195 +1784,26 @@ async def cleanup_expired():
             except:
                 pass
 
-    
-    # Clean expired boosts
     for user_id, boosts in list(user_active_boosts.items()):
         for boost_type, boost_data in list(boosts.items()):
             if boost_data["expires"] < current_time:
                 del user_active_boosts[user_id][boost_type]
 
-@tree.command(name="giveaway", description="Start a number guessing giveaway")
-@app_commands.describe(
-    prize="Prize for the giveaway",
-    author="User hosting the giveaway",
-    number_range="Range for guessing (e.g. 1-100)",
-    duration="How long the giveaway lasts (e.g. 1m, 30s, 2h)",
-    winners="Number of winners needed (default: 1)",
-    target="Optional target user"
-)
-@app_commands.checks.has_any_role(*ADMIN_ROLE_IDS)
-async def giveaway(
-    interaction: discord.Interaction,
-    prize: str,
-    author: discord.User,
-    number_range: str,
-    duration: str,
-    winners: Optional[int] = 1,
-    target: Optional[discord.User] = None
-):
-    if interaction.channel.id != 1363495611995001013:
-        await interaction.response.send_message("This command can only be used in the giveaway channel.", ephemeral=True)
-        return
-
-    # Validate winners count
-    if winners < 1:
-        await interaction.response.send_message("❌ Number of winners must be at least 1.", ephemeral=True)
-        return
-
-    # Parse range like "1-100"
-    try:
-        start, end = map(int, number_range.split("-"))
-        if start >= end:
-            raise ValueError
-    except:
-        await interaction.response.send_message("❌ Invalid number range. Use a format like `1-100`.", ephemeral=True)
-        return
-
-    # Parse duration like "30s", "2m", "1h"
-    time_units = {"s": 1, "m": 60, "h": 3600}
-    try:
-        time_unit = duration[-1]
-        time_value = int(duration[:-1])
-        duration_seconds = time_value * time_units[time_unit]
-        duration_minutes = duration_seconds // 60
-    except:
-        await interaction.response.send_message("❌ Invalid duration. Use `30s`, `1m`, `2h` etc.", ephemeral=True)
-        return
-
-    # Generate random target number
-    target_number = random.randint(start, end)
-
-    # Create the giveaway object
-    giveaway = Giveaway(
-        hoster=author,
-        prize=prize,
-        winners=winners,
-        number_range=(start, end),
-        target=target_number,
-        duration=duration_minutes,
-        channel=interaction.channel
-    )
-    
-    # Store giveaway
-    active_giveaways[interaction.channel.id] = giveaway
-
-    # Open the channel + set slowmode
-    await interaction.channel.set_permissions(interaction.guild.default_role, send_messages=True)
-    await interaction.channel.edit(slowmode_delay=2)
-
-    # Build embed
-    embed = discord.Embed(
-        title="🎁 NUMBER GUESS GIVEAWAY",
-        description=(
-            f"**Host:** {author.mention}\n"
-            f"**Range:** {number_range}\n"
-            f"**Prize:** {prize}\n"
-            f"**Winners Needed:** {winners}\n"
-            f"**Duration:** {duration}\n\n"
-            "Click the button below to enter your guess!"
-        ),
-        color=discord.Color.gold()
-    )
-
-    if target:
-        embed.add_field(name="🎯 Target Player", value=target.mention)
-
-    # Create and send the view
-    view = GiveawayView(giveaway)
-    
-    
-    # Send the message and store the reference
-    if interaction.response.is_done():
-        message = await interaction.followup.send(embed=embed, view=view)
-    else:
-        await interaction.response.send_message(embed=embed, view=view)
-        message = await interaction.original_response()
-    
-    view.message = message
-    giveaway.view = view
-
-    # Schedule the giveaway end
-    if duration_minutes > 0:
-        giveaway.task = asyncio.create_task(schedule_giveaway_end(giveaway))
-
-@tree.command(name="test", description="Admin testing command for trades")
-@app_commands.describe(
-    user1="First user",
-    user2="Second user",
-    user1seed="Seed for first user",
-    user2seed="Seed for second user",
-    autogrow="Whether to instantly grow the seeds"
-)
-@app_commands.checks.has_any_role(*ADMIN_ROLE_IDS)
-async def test_command(
-    interaction: discord.Interaction,
-    user1: discord.Member,
-    user2: discord.Member,
-    user1seed: str,
-    user2seed: str,
-    autogrow: bool = False
-):
-    """Admin command to test trades by giving seeds to two users"""
-    await interaction.response.defer(ephemeral=True)
-    
-    # Process seed names
-    base1, mut1, _ = normalize_seed_name(user1seed)
-    base2, mut2, _ = normalize_seed_name(user2seed)
-    
-    # Validate seeds
-    valid_seeds = list(seeds.keys()) + list(limited_seeds.keys())
-    if base1 not in valid_seeds:
-        return await interaction.followup.send(f"❌ Invalid seed for user1: {base1}", ephemeral=True)
-    if base2 not in valid_seeds:
-        return await interaction.followup.send(f"❌ Invalid seed for user2: {base2}", ephemeral=True)
-    
-    # Create seed objects
-    grow_time = 0 if autogrow else calculate_grow_time(base1, user1.id)
-    seed1 = GrowingSeed(base1, grow_time, mutation=mut1)
-    
-    grow_time = 0 if autogrow else calculate_grow_time(base2, user2.id)
-    seed2 = GrowingSeed(base2, grow_time, mutation=mut2)
-    
-    # Add to inventories
-    if autogrow:
-        user_inventory[user1.id]["grown"].append(seed1)
-        user_inventory[user2.id]["grown"].append(seed2)
-    else:
-        user_inventory[user1.id]["growing"].append(seed1)
-        user_inventory[user2.id]["growing"].append(seed2)
-    
-    # Send confirmation
-    embed = discord.Embed(
-        title="✅ Test Seeds Distributed",
-        color=discord.Color.green()
-    )
-    embed.add_field(
-        name=f"🌱 {user1.display_name} received",
-        value=f"{pretty_seed(seed1)} ({'grown' if autogrow else 'growing'})",
-        inline=False
-    )
-    embed.add_field(
-        name=f"🌱 {user2.display_name} received",
-        value=f"{pretty_seed(seed2)} ({'grown' if autogrow else 'growing'})",
-        inline=False
-    )
-    
-    await interaction.followup.send(embed=embed, ephemeral=True)
+# ============================================================
+# MESSAGE HANDLER
+# ============================================================
 
 @bot.event
 async def on_message(message):
     if message.author.bot:
         return
 
-    # Message counting for sheckles
     user_message_counts[message.author.id] += 1
     if user_message_counts[message.author.id] % MESSAGES_PER_SHECKLE == 0:
         user_sheckles[message.author.id] += 1
 
-    # Handle giveaway messages
     current_giveaway = active_giveaways.get(message.channel.id)
     if current_giveaway:
-        # First check if giveaway has ended (only for timed giveaways)
         if current_giveaway.end_time is not None and time.time() > current_giveaway.end_time:
             try:
                 await message.delete()
@@ -2488,12 +1812,10 @@ async def on_message(message):
                 pass
             return
 
-        # Only process number guesses
         if message.content.strip().isdigit():
             try:
                 guess = int(message.content.strip())
                 
-                # Check if guess is within range
                 if guess < current_giveaway.low or guess > current_giveaway.high:
                     try:
                         await message.reply(f"❌ Guess must be between {current_giveaway.low}-{current_giveaway.high}!", delete_after=5)
@@ -2501,11 +1823,9 @@ async def on_message(message):
                         pass
                     return
                 
-                # Check if guess is correct
                 if current_giveaway.check_guess(message.author, guess):
                     current_giveaway.winners.add(message.author)
                     
-                    # DM the winner
                     try:
                         await message.author.send(
                             f"🎉 You guessed the correct number `{guess}`!\n"
@@ -2516,11 +1836,9 @@ async def on_message(message):
                             f"🎉 {message.author.mention} guessed correctly but can't receive DMs. Please contact the host!"
                         )
                     
-                    # Check if we have enough winners
                     if len(current_giveaway.winners) >= current_giveaway.winners_required:
                         await end_giveaway(current_giveaway)
                 
-                # Add reaction to show guess was received
                 try:
                     await message.add_reaction("🔢")
                 except:
@@ -2529,7 +1847,6 @@ async def on_message(message):
             except ValueError:
                 pass
         else:
-            # Delete non-number messages from participants
             try:
                 await message.delete()
             except:
@@ -2539,5 +1856,217 @@ async def on_message(message):
     await bot.process_commands(message)
 
 
-# Run your bot (replace TOKEN with your bot's token)
+# ============================================================
+# LEAKS SYSTEM
+# ============================================================
+
+import sqlite3
+import json
+
+LEAKS_CHANNEL_NAME = "𝙇𝙀𝘼𝙆𝙎-𝙍𝙀𝙌𝙐𝙀𝙎𝙏"
+
+def get_db():
+    conn = sqlite3.connect("leaks.db")
+    conn.row_factory = sqlite3.Row
+    return conn
+
+def init_db():
+    with get_db() as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS leaks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                link TEXT NOT NULL,
+                payhip_url TEXT NOT NULL,
+                added_by INTEGER NOT NULL,
+                added_at REAL NOT NULL
+            )
+        """)
+        conn.commit()
+
+def search_leaks(query: str):
+    query = query.lower().strip()
+    with get_db() as conn:
+        rows = conn.execute("SELECT * FROM leaks").fetchall()
+    return [r for r in rows if query in r["name"].lower()]
+
+def get_all_leaks():
+    with get_db() as conn:
+        return conn.execute("SELECT * FROM leaks ORDER BY name ASC").fetchall()
+
+def add_leak(name: str, link: str, payhip_url: str, user_id: int):
+    with get_db() as conn:
+        try:
+            conn.execute(
+                "INSERT INTO leaks (name, link, payhip_url, added_by, added_at) VALUES (?, ?, ?, ?, ?)",
+                (name.strip(), link.strip(), payhip_url.strip(), user_id, time.time())
+            )
+            conn.commit()
+            return True
+        except sqlite3.IntegrityError:
+            return False
+
+def delete_leak(name: str):
+    with get_db() as conn:
+        cursor = conn.execute("DELETE FROM leaks WHERE LOWER(name) = ?", (name.lower().strip(),))
+        conn.commit()
+        return cursor.rowcount > 0
+
+# Initialize DB on load
+init_db()
+
+
+@tree.command(name="leakscreate", description="Add a new leak entry (admin only)")
+@auto_defer(ephemeral=False)
+@app_commands.describe(
+    leak="Name of the leak",
+    link="Download/access link",
+    payhip="Payhip product link"
+)
+async def leaks_create(interaction: discord.Interaction, leak: str, link: str, payhip: str):
+    if not has_admin_role(interaction.user):
+        return await interaction.followup.send("❌ Admins only.", ephemeral=True)
+
+    success = add_leak(leak, link, payhip, interaction.user.id)
+    if not success:
+        return await interaction.followup.send(
+            f"❌ A leak named **{leak}** already exists. Use `/leaksdelete` first if you want to replace it.",
+            ephemeral=True
+        )
+
+    embed = discord.Embed(title="✅ Leak Added", color=discord.Color.green())
+    embed.add_field(name="Name", value=leak, inline=False)
+    embed.add_field(name="Download Link", value=link, inline=False)
+    embed.add_field(name="Payhip Link", value=payhip, inline=False)
+    embed.set_footer(text=f"Added by {interaction.user.display_name}")
+    await interaction.followup.send(embed=embed)
+
+
+@tree.command(name="leaks", description="Search for a game asset leak by name")
+@auto_defer(ephemeral=False)
+@app_commands.describe(leak="Name or partial name to search for")
+async def leaks_search(interaction: discord.Interaction, leak: str):
+    if interaction.channel.name != LEAKS_CHANNEL_NAME:
+        return await interaction.followup.send(
+            "❌ This command can only be used in #𝙇𝙀𝘼𝙆𝙎-𝙍𝙀𝙌𝙐𝙀𝙎𝙏.", ephemeral=True
+        )
+
+    results = search_leaks(leak)
+
+    if not results:
+        return await interaction.followup.send(f"❌ No leaks found matching **{leak}**.")
+
+    # Single result — show full embed with payhip
+    if len(results) == 1:
+        row = results[0]
+        embed = discord.Embed(
+            title=f"📦 {row['name']}",
+            color=discord.Color.blurple()
+        )
+        embed.add_field(name="⬇️ Download", value=f"[Click here]({row['link']})", inline=True)
+        embed.add_field(name="🛒 See on Payhip", value=f"[Click here]({row['payhip_url']})", inline=True)
+        embed.set_footer(text=f"Added <t:{int(row['added_at'])}:R> by user ID {row['added_by']}")
+        return await interaction.followup.send(embed=embed)
+
+    # Multiple results — simple list, no payhip
+    embed = discord.Embed(
+        title=f"🔍 Results for \"{leak}\"",
+        description="Multiple matches found. Be more specific to see Payhip links.",
+        color=discord.Color.blurple()
+    )
+
+    for row in results[:10]:
+        embed.add_field(
+            name=row["name"],
+            value=f"[Download Link]({row['link']})",
+            inline=False
+        )
+
+    if len(results) > 10:
+        embed.set_footer(text=f"Showing 10 of {len(results)} results. Try a more specific search.")
+
+    await interaction.followup.send(embed=embed)
+
+
+@tree.command(name="leakslist", description="List all available leaks")
+@auto_defer(ephemeral=False)
+async def leaks_list(interaction: discord.Interaction):
+    if interaction.channel.name != LEAKS_CHANNEL_NAME:
+        return await interaction.followup.send(
+            "❌ This command can only be used in #𝙇𝙀𝘼𝙆𝙎-𝙍𝙀𝙌𝙐𝙀𝙎𝙏.", ephemeral=True
+        )
+
+    rows = get_all_leaks()
+
+    if not rows:
+        return await interaction.followup.send("📭 No leaks in the database yet.")
+
+    chunks = [rows[i:i+15] for i in range(0, len(rows), 15)]
+
+    embed = discord.Embed(
+        title="📦 All Available Leaks",
+        description="\n".join(f"• **{r['name']}**" for r in chunks[0]),
+        color=discord.Color.blurple()
+    )
+    embed.set_footer(
+        text=f"Page 1 of {len(chunks)} | {len(rows)} total leaks | Use /leaks <name> to get links"
+    )
+
+    await interaction.followup.send(embed=embed)
+
+
+@tree.command(name="leaksdelete", description="Delete a leak entry (admin only)")
+@auto_defer(ephemeral=False)
+@app_commands.describe(leak="Exact name of the leak to delete")
+async def leaks_delete(interaction: discord.Interaction, leak: str):
+    if not has_admin_role(interaction.user):
+        return await interaction.followup.send("❌ Admins only.", ephemeral=True)
+
+    success = delete_leak(leak)
+    if not success:
+        return await interaction.followup.send(
+            f"❌ No leak found with the name **{leak}**. Names are case-insensitive."
+        )
+
+    embed = discord.Embed(
+        title="🗑️ Leak Deleted",
+        description=f"**{leak}** has been removed from the database.",
+        color=discord.Color.red()
+    )
+    await interaction.followup.send(embed=embed)
+
+
+@tree.command(name="leaksexport", description="Export the entire leaks database as a JSON file (admin only)")
+@auto_defer(ephemeral=True)
+async def leaks_export(interaction: discord.Interaction):
+    if not has_admin_role(interaction.user):
+        return await interaction.followup.send("❌ Admins only.", ephemeral=True)
+
+    rows = get_all_leaks()
+
+    if not rows:
+        return await interaction.followup.send("📭 No leaks in the database to export.", ephemeral=True)
+
+    data = [
+        {
+            "id": r["id"],
+            "name": r["name"],
+            "link": r["link"],
+            "payhip_url": r["payhip_url"],
+            "added_by": r["added_by"],
+            "added_at": r["added_at"]
+        }
+        for r in rows
+    ]
+
+    json_bytes = json.dumps(data, indent=2).encode("utf-8")
+    file = discord.File(fp=BytesIO(json_bytes), filename="leaks_export.json")
+
+    await interaction.followup.send(
+        content=f"✅ Exported **{len(data)}** leaks.",
+        file=file,
+        ephemeral=True
+    )
+
+
 bot.run(os.getenv("BOT_TOKEN"))
