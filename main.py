@@ -48,8 +48,8 @@ tree = bot.tree
 
 GIVEAWAY_CHANNEL_NAME = "🎁︱𝒩𝓊𝓂𝒷𝑒𝓇-𝒢𝒾𝓋𝑒𝒶𝓌𝒶𝓎"
 TICKET_CATEGORY_ID = 1348042174159392768
-ADMIN_ROLES = ["Admin"]
-ADMIN_ROLE_IDS = [1517236355275428040]
+ADMIN_ROLES = ["Admin", "Staff"]
+ADMIN_ROLE_IDS = [1517236355275428040, 1517235116114579727]
 MESSAGES_PER_SHECKLE = 10  # Number of messages needed to earn 1 sheckle
 
 giveaway_logs = []
