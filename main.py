@@ -2016,7 +2016,7 @@ def build_search_embed(results, query: str, page: int) -> discord.Embed:
 
 class LeaksListView(discord.ui.View):
     def __init__(self, rows, page: int = 0):
-        super().__init__(timeout=120)
+        super().__init__(timeout=None)
         self.rows = rows
         self.page = page
         self.total_pages = max(1, (len(rows) + PAGE_SIZE - 1) // PAGE_SIZE)
@@ -2045,7 +2045,7 @@ class LeaksListView(discord.ui.View):
 
 class LeaksSearchView(discord.ui.View):
     def __init__(self, results, query: str, page: int = 0):
-        super().__init__(timeout=120)
+        super().__init__(timeout=None)
         self.results = results
         self.query = query
         self.page = page
